@@ -5,8 +5,7 @@ import unittest
 from click.testing import CliRunner
 
 from ansible_shed.main import main
-
-# from ansible_shed.tests.something import STests  # noqa: F401
+from ansible_shed.tests.ansible_output import AnsibleOutputTests  # noqa: F401
 
 
 class TestCLI(unittest.TestCase):

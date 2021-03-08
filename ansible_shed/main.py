@@ -2,64 +2,16 @@
 
 import asyncio
 import logging
-import os
 import sys
+from configparser import ConfigParser
 from pathlib import Path
-from subprocess import run
-from time import time
-from typing import Any, Dict, Union
+from typing import Any, Union
 
 import click
+from ansible_shed.shed import Shed
 
 
 LOG = logging.getLogger(__name__)
-
-
-class Shed:
-    def __init__(
-        self, interval: int, repo_path: str, repo_url: str, port: int = 12345
-    ) -> None:
-        self.run_interval_seconds = interval * 60
-        self.repo_path = Path(repo_path)
-        self.repo_url = repo_url
-        self.stats_port = port
-        self.prom_stats: Dict[str, int] = {}
-
-    def _rebase_or_clone_repo(self) -> None:
-        if self.repo_path.exists():
-            LOG.info(f"Rebasing {self.repo_path} from {self.repo_url}")
-            run(["/usr/bin/git", "pull", "--rebase"])
-            return
-
-        LOG.info(f"Cloning {self.repo_url} to {self.repo_path}")
-        os.chdir(str(self.repo_path.parent))
-        run(["/usr/bin/git", "clone", self.repo_url])
-
-    def _run_ansible(self, repo_local_path: Path) -> None:
-        """Run ansible-playbook and parse out statistics for prometheus"""
-        pass
-
-    async def prometheus_server(self) -> None:
-        """Use aioprometheus to server statistics to prometheus"""
-        pass
-
-    # TODO: Make coroutine cleanly exit on shutdown
-    async def ansible_runner(self) -> None:
-        loop = asyncio.get_running_loop()
-        while True:
-            run_start_time = time()
-            # Rebase ansible repo
-            await loop.run_in_executor(None, self._rebase_or_clone_repo)
-            # Run ansible playbook
-            await loop.run_in_executor(None, self._run_ansible)
-
-            # TODO: Collect stats and have ready for prometheus to collect
-
-            run_finish_time = time()
-            run_time = int(run_finish_time - run_start_time)
-            sleep_time = self.run_interval_seconds - run_time
-            LOG.info(f"Finished ansible run in {run_time}s. Sleeping for {sleep_time}s")
-            await asyncio.sleep(sleep_time)
 
 
 def _handle_debug(
@@ -76,11 +28,26 @@ def _handle_debug(
     return debug
 
 
-async def async_main(
-    debug: bool, interval: int, port: int, repo_path: str, repo_url: str
-) -> int:
+def _load_shed_config(config_path: Path) -> ConfigParser:
+    cp = ConfigParser()
+    with config_path.open("r") as cpfp:
+        cp.read_file(cpfp)
+    return cp
+
+
+async def async_main(debug: bool, config: str) -> int:
+    if not config:
+        LOG.error("Please pass a config so we can do great things!")
+        return 69
+
+    config_path = Path(config)
+    if not config_path.exists():
+        LOG.error(f"{config} does not exist.")
+        return 1
+
+    config_cp = _load_shed_config(config_path)
     # TODO: Signal handlers + cleanup
-    s = Shed(interval, repo_path, repo_url, port)
+    s = Shed(config_cp)
     await asyncio.gather(s.prometheus_server(), s.ansible_runner())
     return 0
 
@@ -94,33 +61,10 @@ async def async_main(
     help="Turn on debug logging",
 )
 @click.option(
-    "-i",
-    "--interval",
-    default=60,
+    "--config",
+    default="/etc/ansible_shed.ini",
     show_default=True,
-    help="Shed run intervals (minutes between runs)",
-)
-@click.option(
-    "-p",
-    "--port",
-    default=12345,
-    type=int,
-    show_default=True,
-    help="Port for prometheus exporter",
-)
-@click.option(
-    "-R",
-    "--repo-path",
-    default=os.getcwd(),
-    show_default=True,
-    help="Path to store repo locally",
-)
-@click.option(
-    "-r",
-    "--repo-url",
-    default="git@github.com:cooperlees/clc_ansible.git",
-    show_default=True,
-    help="URL of ansible repo",
+    help="Path to ansible shed configuration",
 )
 @click.pass_context
 def main(ctx: click.core.Context, **kwargs: Any) -> None:
