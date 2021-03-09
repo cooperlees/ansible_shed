@@ -85,8 +85,7 @@ class Shed:
 
         # Parse Ansible output to get stats
         for output_line in cp.stdout.splitlines():
-            lm = self.ansible_stats_line_re.search(output_line)
-            if not lm:
+            if not (lm := self.ansible_stats_line_re.search(output_line)):
                 continue
 
             hostname = lm.group(1)
