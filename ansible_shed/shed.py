@@ -32,13 +32,13 @@ class Shed:
             run(["/usr/bin/git", "pull", "--rebase"])
             return
 
+        self.repo_path.mkdir(parents=True)
         LOG.info(f"Cloning {self.repo_url} to {self.repo_path}")
-        os.chdir(str(self.repo_path.parent))
-        run(["/usr/bin/git", "clone", self.repo_url])
+        run(["/usr/bin/git", "clone", self.repo_url, str(self.repo_path)])
 
     def _run_ansible(self) -> CompletedProcess:
         """Run ansible-playbook and parse out statistics for prometheus"""
-        os.chdir(str(self.repo_path.parent))
+        os.chdir(str(self.repo_path))
         cmd = [
             self.config[SHED_CONFIG_SECTION]["ansible_playbook_binary"],
             "--inventory",
