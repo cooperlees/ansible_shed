@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-import os
+import re
 from configparser import ConfigParser
 from collections import defaultdict
 from json import dumps
@@ -18,6 +18,8 @@ SHED_CONFIG_SECTION = "ansible_shed"
 
 
 class Shed:
+    ansible_stats_line_re = re.compile(r"([a-z\.0-9]*) *:(.*)")
+
     def __init__(self, config: ConfigParser) -> None:
         self.config = config
         self.prom_stats: Dict[str, int] = defaultdict(int)
@@ -29,7 +31,7 @@ class Shed:
     def _rebase_or_clone_repo(self) -> None:
         if self.repo_path.exists():
             LOG.info(f"Rebasing {self.repo_path} from {self.repo_url}")
-            run(["/usr/bin/git", "pull", "--rebase"])
+            run(["/usr/bin/git", "pull", "--rebase"], cwd=self.repo_path)
             return
 
         self.repo_path.mkdir(parents=True)
@@ -38,7 +40,6 @@ class Shed:
 
     def _run_ansible(self) -> CompletedProcess:
         """Run ansible-playbook and parse out statistics for prometheus"""
-        os.chdir(str(self.repo_path))
         cmd = [
             self.config[SHED_CONFIG_SECTION]["ansible_playbook_binary"],
             "--inventory",
@@ -65,7 +66,7 @@ class Shed:
             )
         LOG.info(f"Running ansible-playbook: '{' '.join(cmd)}'")
         ansible_start_time = time()
-        cp = run(cmd, stdout=PIPE)
+        cp = run(cmd, stdout=PIPE, cwd=self.repo_path, encoding="utf-8")
         runtime = int(time() - ansible_start_time)
         self.prom_stats["ansible_run_time"] = runtime
         LOG.info(f"Finished running ansible in {runtime}s")
@@ -77,7 +78,24 @@ class Shed:
 
     def parse_ansible_stats(self, cp: CompletedProcess) -> None:
         LOG.info("Parsing ansible run output to update stats")
-        self.prom_stats["last_run_returncode"] = cp.returncode
+        # Clear out old stats
+        for key in list(self.prom_stats.keys()):
+            if key.startswith("host_"):
+                del self.prom_stats[key]
+
+        # Parse Ansible output to get stats
+        for output_line in cp.stdout.splitlines():
+            lm = self.ansible_stats_line_re.search(output_line)
+            if not lm:
+                continue
+
+            hostname = lm.group(1)
+            results = lm.group(2)
+            for stat in results.split():
+                k, v = stat.split("=", maxsplit=1)
+                self.prom_stats[f"host_{hostname}_{k}"] = int(v)
+
+        self.prom_stats["ansible_last_run_returncode"] = cp.returncode
         self.prom_stats["ansible_stats_last_updated"] = int(time())
 
     # TODO: Make coroutine cleanly exit on shutdown

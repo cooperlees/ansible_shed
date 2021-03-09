@@ -2,12 +2,15 @@
 
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from ansible_shed.main import _load_shed_config
 from ansible_shed.shed import Shed
 from ansible_shed.tests.ansible_output_fixtures import (  # noqa: F401
     ANSIBLE_FAIL_CP,
     ANSIBLE_SUCCESS_CP,
+    EXPECTED_FAIL_STATS,
+    EXPECTED_SUCCESS_STATS,
 )
 
 
@@ -19,3 +22,12 @@ class AnsibleOutputTests(unittest.TestCase):
     def setUp(self) -> None:
         self.shed = Shed(SHED_CONFIG)
         return super().setUp()
+
+    @patch("ansible_shed.shed.time")
+    def test_parsing_ansible_output(self, mock_time: Mock) -> None:
+        mock_time.return_value = 69
+        self.shed.parse_ansible_stats(ANSIBLE_SUCCESS_CP)
+        self.assertEqual(self.shed.prom_stats, EXPECTED_SUCCESS_STATS)
+        # Run fail stats to ensure clearing works
+        self.shed.parse_ansible_stats(ANSIBLE_FAIL_CP)
+        self.assertEqual(self.shed.prom_stats, EXPECTED_FAIL_STATS)
