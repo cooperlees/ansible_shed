@@ -98,10 +98,13 @@ Today I only run it by systemd cause it makes SSH auth easier. Would happily tak
 ## Config
 
 *(TODO: Full config file docs - PR welcome)*
+
 We have a simple ini file to point @ your `ansbile-playbook` binary and arguments.
 If not specified, ansible_shed defaults to look for `/etc/ansible_shed.ini`
 
-Also other things like:
+- We have an example config here: [ansible_shed.ini](ansible_shed.ini)
+
+Config Settings:
 
 - `interval`: Minutes between `ansible-playbook` runs
 - `start_splay`: Upper max of time to wait before first `ansible-playbook` run after starting the service - Code generates a random int from 0 to this upper max.
