@@ -11,7 +11,7 @@ from ansible_shed.tests.ansible_output_fixtures import (  # noqa: F401
 )
 
 
-SHED_CONFIG_PATH = Path(__file__).parent.parent / "shed.ini"
+SHED_CONFIG_PATH = Path(__file__).parent.parent.parent / "ansible_shed.ini"
 SHED_CONFIG = _load_shed_config(SHED_CONFIG_PATH)
 
 
