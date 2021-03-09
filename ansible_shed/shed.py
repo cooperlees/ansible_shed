@@ -20,7 +20,7 @@ SHED_CONFIG_SECTION = "ansible_shed"
 
 
 class Shed:
-    ansible_stats_line_re = re.compile(r"([a-z\.0-9]*) *:(.*)")
+    ansible_stats_line_re = re.compile(r"([a-z\.0-9]*)\s+: (ok=.*)")
 
     def __init__(self, config: ConfigParser) -> None:
         self.config = config
@@ -132,12 +132,13 @@ class Shed:
                 metric_count += 1
                 if not k.startswith("host_"):
                     prom_gauges[k].set({}, v)
+                    continue
 
-                _, hostname, metric_name = k.split("_", maxsplit=3)
+                _, hostname, metric_name = k.split("_", maxsplit=2)
                 prom_gauges[metric_name].set({"hostname": hostname}, v)
 
             LOG.info(f"Updated {metric_count} metrics")
-
+            self.prom_stats_update.clear()
 
     async def prometheus_server(self) -> None:
         """Use aioprometheus to server statistics to prometheus"""
