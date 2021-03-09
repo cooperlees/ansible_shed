@@ -1,0 +1,17 @@
+[Unit]
+Description=Daemon to run ansible and exports stats ready for prometheus collection
+After=network.target
+
+[Service]
+Type=simple
+# User needs SSH auth to hosts
+User=cooper
+ExecStart=/usr/local/bin/ansible-shed --debug
+Restart=on-failure
+# Limit to 3 restarts per 30 seconds
+RestartSec=5
+StartLimitInterval=30
+StartLimitBurst=3
+
+[Install]
+WantedBy=multi-user.target
