@@ -35,7 +35,7 @@ setup(
         "Development Status :: 3 - Alpha",
     ],
     entry_points={"console_scripts": ["ansible-shed = ansible_shed.main:main"]},
-    install_requires=["ansible", "aioprometheus", "click"],
+    install_requires=["ansible", "aioprometheus[aiohttp]", "click"],
     test_require=["ptr"],
     python_requires=">=3.8",
     test_suite=ptr_params["test_suite"],

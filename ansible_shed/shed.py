@@ -12,6 +12,8 @@ from subprocess import CompletedProcess, PIPE, run
 from time import time
 from typing import Dict
 
+from aioprometheus import Gauge, Service
+
 
 LOG = logging.getLogger(__name__)
 SHED_CONFIG_SECTION = "ansible_shed"
@@ -23,6 +25,7 @@ class Shed:
     def __init__(self, config: ConfigParser) -> None:
         self.config = config
         self.prom_stats: Dict[str, int] = defaultdict(int)
+        self.prom_stats_update = asyncio.Event()
         self.repo_path = Path(config[SHED_CONFIG_SECTION].get("repo_path"))
         self.repo_url = config[SHED_CONFIG_SECTION].get("repo_url")
         self.run_interval_seconds = config[SHED_CONFIG_SECTION].getint("interval") * 60
@@ -68,13 +71,9 @@ class Shed:
         ansible_start_time = time()
         cp = run(cmd, stdout=PIPE, cwd=self.repo_path, encoding="utf-8")
         runtime = int(time() - ansible_start_time)
-        self.prom_stats["ansible_run_time"] = runtime
+        self.prom_stats["ansible_last_run_time"] = runtime
         LOG.info(f"Finished running ansible in {runtime}s")
         return cp
-
-    async def prometheus_server(self) -> None:
-        """Use aioprometheus to server statistics to prometheus"""
-        pass
 
     def parse_ansible_stats(self, cp: CompletedProcess) -> None:
         LOG.info("Parsing ansible run output to update stats")
@@ -96,6 +95,49 @@ class Shed:
 
         self.prom_stats["ansible_last_run_returncode"] = cp.returncode
         self.prom_stats["ansible_stats_last_updated"] = int(time())
+        self.prom_stats_update.set()
+
+    async def _update_prom_stats(self) -> None:
+        """Check for new stats every 30 seconds - Only run if last updated is newer"""
+        prom_gauges = {
+            "ansible_last_run_returncode": Gauge(
+                "ansible_last_run_returncode",
+                "UNIX return code of the ansible-playbook process",
+            ),
+            "ansible_last_run_time": Gauge(
+                "ansible_last_run_time",
+                "Time in seconds it took the ansible-playbook process to execute",
+            ),
+            "ansible_stats_last_updated": Gauge(
+                "ansible_stats_last_updated",
+                "UNIX timestamp of last time we updated the stats",
+            ),
+            "ok": Gauge("ansible_ok", "Number of 'ok' (no change) plays"),
+            "changed": Gauge("ansible_changed", "Number of 'changed' plays"),
+            "unreachable": Gauge("ansible_unreachable", "Number of inaccessible hosts"),
+            "failed": Gauge("ansible_failed", "Number of failed plays on hosts"),
+            "skipped": Gauge("ansible_skipped", "Number of skipped plays on hosts"),
+            "rescued": Gauge("ansible_rescued", "Number of rescued plays on hosts"),
+            "ignored": Gauge("ansible_ignored", "Number of ignored plays on hosts"),
+        }
+        for gauge in prom_gauges.values():
+            self.prom_service.register(gauge)
+
+        while True:
+            await self.prom_stats_update.wait()
+            LOG.debug("Updating prometheus stats due to event being set")
+            for k, v in self.prom_stats.items():
+                if not k.startswith("host_"):
+                    prom_gauges[k].set({}, v)
+
+            # TODO: Add per host counts + LOG of # of metrics processes
+
+    async def prometheus_server(self) -> None:
+        """Use aioprometheus to server statistics to prometheus"""
+        self.prom_service = Service()
+        await self.prom_service.start(addr="::", port=self.stats_port)
+        LOG.info(f"Serving prometheus metrics on: {self.prom_service.metrics_url}")
+        await self._update_prom_stats()
 
     # TODO: Make coroutine cleanly exit on shutdown
     async def ansible_runner(self) -> None:
