@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 from ansible_shed.main import _load_shed_config
 from ansible_shed.shed import Shed
-from ansible_shed.tests.ansible_output_fixtures import (  # noqa: F401
+from ansible_shed.tests.ansible_output_fixtures import (
     ANSIBLE_FAIL_CP,
     ANSIBLE_SUCCESS_CP,
     EXPECTED_FAIL_STATS,
