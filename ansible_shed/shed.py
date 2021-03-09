@@ -126,11 +126,18 @@ class Shed:
         while True:
             await self.prom_stats_update.wait()
             LOG.debug("Updating prometheus stats due to event being set")
+
+            metric_count = 0
             for k, v in self.prom_stats.items():
+                metric_count += 1
                 if not k.startswith("host_"):
                     prom_gauges[k].set({}, v)
 
-            # TODO: Add per host counts + LOG of # of metrics processes
+                _, hostname, metric_name = k.split("_", maxsplit=3)
+                prom_gauges[metric_name].set({"hostname": hostname}, v)
+
+            LOG.info(f"Updated {metric_count} metrics")
+
 
     async def prometheus_server(self) -> None:
         """Use aioprometheus to server statistics to prometheus"""
