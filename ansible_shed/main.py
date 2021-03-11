@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import sys
-from configparser import ConfigParser
 from pathlib import Path
 from typing import Any, Union
 
@@ -28,13 +27,6 @@ def _handle_debug(
     return debug
 
 
-def _load_shed_config(config_path: Path) -> ConfigParser:
-    cp = ConfigParser()
-    with config_path.open("r") as cpfp:
-        cp.read_file(cpfp)
-    return cp
-
-
 async def async_main(debug: bool, config: str) -> int:
     if not config:
         LOG.error("Please pass a config so we can do great things!")
@@ -45,9 +37,8 @@ async def async_main(debug: bool, config: str) -> int:
         LOG.error(f"{config} does not exist.")
         return 1
 
-    config_cp = _load_shed_config(config_path)
     # TODO: Signal handlers + cleanup
-    s = Shed(config_cp)
+    s = Shed(config_path)
     await asyncio.gather(s.prometheus_server(), s.ansible_runner())
     return 0
 

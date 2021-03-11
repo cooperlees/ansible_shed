@@ -20,8 +20,11 @@ ptr_params = {
 
 setup(
     name="ansible_shed",
-    version="2021.3.8",
-    description="asyncio ansible tower like shed to run playbooks and have prometheus collector stats",
+    version="2021.3.10",
+    description=(
+        "asyncio ansible tower like shed to run playbooks and have prometheus "
+        + "collector stats"
+    ),
     packages=["ansible_shed", "ansible_shed.tests"],
     url="http://github.com/cooperlees/ansible_shed/",
     author="Cooper Lees",

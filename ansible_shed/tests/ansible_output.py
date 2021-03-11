@@ -4,7 +4,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from ansible_shed.main import _load_shed_config
 from ansible_shed.shed import Shed
 from ansible_shed.tests.ansible_output_fixtures import (
     ANSIBLE_FAIL_CP,
@@ -15,12 +14,11 @@ from ansible_shed.tests.ansible_output_fixtures import (
 
 
 SHED_CONFIG_PATH = Path(__file__).parent.parent.parent / "ansible_shed.ini"
-SHED_CONFIG = _load_shed_config(SHED_CONFIG_PATH)
 
 
 class AnsibleOutputTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.shed = Shed(SHED_CONFIG)
+        self.shed = Shed(SHED_CONFIG_PATH)
         return super().setUp()
 
     @patch("ansible_shed.shed.time")

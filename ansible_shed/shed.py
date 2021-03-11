@@ -19,17 +19,31 @@ LOG = logging.getLogger(__name__)
 SHED_CONFIG_SECTION = "ansible_shed"
 
 
+def _load_shed_config(config_path: Path) -> ConfigParser:
+    cp = ConfigParser()
+    with config_path.open("r") as cpfp:
+        cp.read_file(cpfp)
+    return cp
+
+
 class Shed:
     ansible_stats_line_re = re.compile(r"([a-z\.0-9]*)\s+: (ok=.*)")
 
-    def __init__(self, config: ConfigParser) -> None:
-        self.config = config
+    def __init__(self, config_path: Path) -> None:
+        self.config = _load_shed_config(config_path)
+        self.config_path = config_path
+        self.reload_config_vars()
+
         self.prom_stats: Dict[str, int] = defaultdict(int)
         self.prom_stats_update = asyncio.Event()
-        self.repo_path = Path(config[SHED_CONFIG_SECTION].get("repo_path"))
-        self.repo_url = config[SHED_CONFIG_SECTION].get("repo_url")
-        self.run_interval_seconds = config[SHED_CONFIG_SECTION].getint("interval") * 60
-        self.stats_port = config[SHED_CONFIG_SECTION].getint("port")
+
+    def reload_config_vars(self) -> None:
+        self.repo_path = Path(self.config[SHED_CONFIG_SECTION].get("repo_path"))
+        self.repo_url = self.config[SHED_CONFIG_SECTION].get("repo_url")
+        self.run_interval_seconds = (
+            self.config[SHED_CONFIG_SECTION].getint("interval") * 60
+        )
+        self.stats_port = self.config[SHED_CONFIG_SECTION].getint("port")
 
     def _rebase_or_clone_repo(self) -> None:
         if self.repo_path.exists():
@@ -160,6 +174,11 @@ class Shed:
 
         while True:
             run_start_time = time()
+            # Reload Config File
+            self.config = await loop.run_in_executor(
+                None, _load_shed_config, self.config_path
+            )
+            self.reload_config_vars()
             # Rebase ansible repo
             await loop.run_in_executor(None, self._rebase_or_clone_repo)
             # Run ansible playbook
