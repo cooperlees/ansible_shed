@@ -38,7 +38,7 @@ setup(
         "Development Status :: 3 - Alpha",
     ],
     entry_points={"console_scripts": ["ansible-shed = ansible_shed.main:main"]},
-    install_requires=["aioprometheus[aiohttp]", "click"],
+    install_requires=["aioprometheus[aiohttp]", "click", "GitPython"],
     extras_require={
         # If you'd like the ansible toolset dependency installed
         "ansible": ["ansible"],

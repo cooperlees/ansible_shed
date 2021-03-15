@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import re
+from git import Git, Repo
 from configparser import ConfigParser
 from collections import defaultdict
 from json import dumps
@@ -48,12 +49,19 @@ class Shed:
     def _rebase_or_clone_repo(self) -> None:
         if self.repo_path.exists():
             LOG.info(f"Rebasing {self.repo_path} from {self.repo_url}")
-            run(["/usr/bin/git", "pull", "--rebase"], cwd=self.repo_path)
+            git_ssh_cmd = f"ssh -i {self.config[SHED_CONFIG_SECTION].get('repo_key')}"
+            with Git().custom_environment(GIT_SSH_COMMAND=git_ssh_cmd):
+                repo = Repo(self.repo_path)
+                repo.remotes.origin.fetch()
+                repo.remotes.origin.refs.master.checkout()
             return
 
         self.repo_path.mkdir(parents=True)
         LOG.info(f"Cloning {self.repo_url} to {self.repo_path}")
-        run(["/usr/bin/git", "clone", self.repo_url, str(self.repo_path)])
+
+        git_ssh_cmd = f"ssh -i {self.config[SHED_CONFIG_SECTION].get('repo_key')}"
+        with Git().custom_environment(GIT_SSH_COMMAND=git_ssh_cmd):
+            Repo.clone_from(self.repo_url, self.repo_path, branch="master")
 
     def _run_ansible(self) -> CompletedProcess:
         """Run ansible-playbook and parse out statistics for prometheus"""
