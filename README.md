@@ -79,6 +79,10 @@ ansible_unreachable{hostname="home2.cooperlees.com"} 0
 - Avaliable http://IP:PORT/metrics
   - All [aioprometheus](https://github.com/claws/aioprometheus) powered
 
+## Grafana Dashboard
+
+- Available here: https://grafana.com/grafana/dashboards/14073
+
 ## Install
 
 We're not on PyPI as I don't feel the need (if we get popular that's easy to fix).
