@@ -49,7 +49,7 @@ class Shed:
     def _rebase_or_clone_repo(self) -> None:
         if self.repo_path.exists():
             LOG.info(f"Rebasing {self.repo_path} from {self.repo_url}")
-            git_ssh_cmd = f"ssh -i {self.config[SHED_CONFIG_SECTION].get('repo_key')}"
+            git_ssh_cmd = f"ssh -o StrictHostKeyChecking=no -i {self.config[SHED_CONFIG_SECTION].get('repo_key')}"
             with Git().custom_environment(GIT_SSH_COMMAND=git_ssh_cmd):
                 repo = Repo(self.repo_path)
                 repo.remotes.origin.fetch()
@@ -59,7 +59,7 @@ class Shed:
         self.repo_path.mkdir(parents=True)
         LOG.info(f"Cloning {self.repo_url} to {self.repo_path}")
 
-        git_ssh_cmd = f"ssh -i {self.config[SHED_CONFIG_SECTION].get('repo_key')}"
+        git_ssh_cmd = f"ssh -o StrictHostKeyChecking=no -i {self.config[SHED_CONFIG_SECTION].get('repo_key')}"
         with Git().custom_environment(GIT_SSH_COMMAND=git_ssh_cmd):
             Repo.clone_from(self.repo_url, self.repo_path, branch="master")
 
