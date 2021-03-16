@@ -7,11 +7,10 @@ ptr_params = {
     "entry_point_module": "ansible_shed/main",
     "test_suite": "ansible_shed.tests.base",
     "test_suite_timeout": 300,
-    # New coverage can have `exit` in output and break ptr
-    # https://github.com/facebookincubator/ptr/issues/107
-    #    "required_coverage": {
-    #        "ansible_shed/main.py": 50,
-    #    },
+    "required_coverage": {
+        "ansible_shed/main.py": 44,
+        "ansible_shed/shed.py": 43,
+    },
     "run_flake8": True,
     "run_black": True,
     "run_mypy": True,
