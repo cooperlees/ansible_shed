@@ -3,7 +3,7 @@
 import asyncio
 from collections import defaultdict
 from configparser import ConfigParser
-from git import Git, Repo
+from git import Repo
 from json import dumps
 import logging
 from pathlib import Path
