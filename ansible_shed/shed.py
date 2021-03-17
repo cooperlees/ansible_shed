@@ -64,7 +64,7 @@ class Shed:
         # if we are at the point where init doesn't exist, git failed in the first pass
         # clear house and start again. Never hurts to start clean.
         if self.repo_path.exists():
-            LOG.info(f"Repo is corrupted, re-cloning")
+            LOG.info("Repo is corrupted, re-cloning")
             # must use shutil because rmdir requires empty directory which is not guaranteed
             shutil.rmtree(self.repo_path)
 
