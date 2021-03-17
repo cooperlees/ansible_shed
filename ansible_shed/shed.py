@@ -74,7 +74,7 @@ class Shed:
         Repo.clone_from(
             self.repo_url,
             self.repo_path,
-            env={"GIT_SSH_COMMAND": git_ssh_command},
+            env={"GIT_SSH_COMMAND": git_ssh_cmd},
             branch="master",
         )
 
