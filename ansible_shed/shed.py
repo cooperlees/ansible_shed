@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 
 import asyncio
-from collections import defaultdict
-from configparser import ConfigParser
-from git import Repo
-from json import dumps
 import logging
-from pathlib import Path
-from random import randint
 import re
 import shutil
-from subprocess import CompletedProcess, PIPE, run
+from collections import defaultdict
+from configparser import ConfigParser
+from datetime import datetime
+from git import Repo
+from json import dumps
+from pathlib import Path
+from random import randint
+from subprocess import PIPE, Popen, run
 from time import time
-from typing import Dict
+from typing import Dict, Optional, Tuple
 
 from aioprometheus import Gauge, Service
 
@@ -38,6 +39,12 @@ class Shed:
 
         self.prom_stats: Dict[str, int] = defaultdict(int)
         self.prom_stats_update = asyncio.Event()
+
+        # Set and create log directory
+        log_dir = self.config[SHED_CONFIG_SECTION].get("log_dir")
+        self.log_dir_path = Path(log_dir) if log_dir else None
+        if self.log_dir_path:
+            self.log_dir_path.mkdir(exist_ok=True)
 
     def reload_config_vars(self) -> None:
         self.repo_path = Path(self.config[SHED_CONFIG_SECTION].get("repo_path"))
@@ -78,8 +85,18 @@ class Shed:
             branch="master",
         )
 
-    def _run_ansible(self) -> CompletedProcess:
+    def _create_logfile(self) -> Optional[Path]:
+        """Create a timestamped logfile"""
+        if not self.log_dir_path:
+            return None
+
+        now = datetime.now().strftime("%Y%m%d%H%M%S")
+        return self.log_dir_path / f"ansible_shed_run_{now}.log"
+
+    def _run_ansible(self) -> Tuple[int, str]:
         """Run ansible-playbook and parse out statistics for prometheus"""
+        run_log_path = self._create_logfile()
+
         cmd = [
             self.config[SHED_CONFIG_SECTION]["ansible_playbook_binary"],
             "--inventory",
@@ -106,13 +123,32 @@ class Shed:
             )
         LOG.info(f"Running ansible-playbook: '{' '.join(cmd)}'")
         ansible_start_time = time()
-        cp = run(cmd, stdout=PIPE, cwd=self.repo_path, encoding="utf-8")
+
+        if not run_log_path:
+            cp = run(cmd, stdout=PIPE, cwd=self.repo_path, encoding="utf-8")
+            ansible_output = cp.stdout
+            return_code = cp.returncode
+        else:
+            ansible_output = ""
+            with Popen(
+                cmd, stderr=PIPE, stdout=PIPE, cwd=self.repo_path, encoding="utf8"
+            ) as p, run_log_path.open("w", buffering=1) as lf:
+                if p.stdout:
+                    for output_line in p.stdout:
+                        ansible_output += output_line
+                        lf.write(output_line)
+
+                if p.stderr:
+                    lf.write(p.stderr.read())
+
+            return_code = p.returncode
+
         runtime = int(time() - ansible_start_time)
         self.prom_stats["ansible_last_run_time"] = runtime
         LOG.info(f"Finished running ansible in {runtime}s")
-        return cp
+        return (return_code, ansible_output)
 
-    def parse_ansible_stats(self, cp: CompletedProcess) -> None:
+    def parse_ansible_stats(self, ansible_output: str, returncode: int) -> None:
         LOG.info("Parsing ansible run output to update stats")
         # Clear out old stats
         for key in list(self.prom_stats.keys()):
@@ -120,7 +156,7 @@ class Shed:
                 del self.prom_stats[key]
 
         # Parse Ansible output to get stats
-        for output_line in cp.stdout.splitlines():
+        for output_line in ansible_output.splitlines():
             if not (lm := self.ansible_stats_line_re.search(output_line)):
                 continue
 
@@ -130,7 +166,7 @@ class Shed:
                 k, v = stat.split("=", maxsplit=1)
                 self.prom_stats[f"host_{hostname}_{k}"] = int(v)
 
-        self.prom_stats["ansible_last_run_returncode"] = cp.returncode
+        self.prom_stats["ansible_last_run_returncode"] = returncode
         self.prom_stats["ansible_stats_last_updated"] = int(time())
         self.prom_stats_update.set()
 
@@ -205,9 +241,13 @@ class Shed:
             # Rebase ansible repo
             await loop.run_in_executor(None, self._rebase_or_clone_repo)
             # Run ansible playbook
-            cp = await loop.run_in_executor(None, self._run_ansible)
+            returncode, ansible_output = await loop.run_in_executor(
+                None, self._run_ansible
+            )
             # Parse ansible success or error
-            await loop.run_in_executor(None, self.parse_ansible_stats, cp)
+            await loop.run_in_executor(
+                None, self.parse_ansible_stats, ansible_output, returncode
+            )
 
             run_finish_time = time()
             run_time = int(run_finish_time - run_start_time)

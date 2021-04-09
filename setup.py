@@ -9,7 +9,7 @@ ptr_params = {
     "test_suite_timeout": 300,
     "required_coverage": {
         "ansible_shed/main.py": 44,
-        "ansible_shed/shed.py": 43,
+        "ansible_shed/shed.py": 42,
     },
     "run_flake8": True,
     "run_black": True,
@@ -19,7 +19,7 @@ ptr_params = {
 
 setup(
     name="ansible_shed",
-    version="2021.3.16",
+    version="2021.4.13",
     description=(
         "asyncio ansible tower like shed to run playbooks and have prometheus "
         + "collector stats"

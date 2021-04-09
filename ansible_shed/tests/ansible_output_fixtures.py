@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-from subprocess import CompletedProcess
-
 
 ANSIBLE_FAIL_OUTPUT = """\
 PLAY RECAP *********************************************************************
@@ -14,13 +12,6 @@ PLAY RECAP *********************************************************************
 unittest1.cooperlees.com       : ok=7    changed=0    unreachable=0    failed=0    skipped=1    rescued=0    ignored=0
 unittest2.cooperlees.com       : ok=7    changed=0    unreachable=0    failed=0    skipped=1    rescued=0    ignored=0
 """
-
-ANSIBLE_FAIL_CP = CompletedProcess(
-    ["ansible-playbook", "--success"], 1, ANSIBLE_FAIL_OUTPUT, ""
-)
-ANSIBLE_SUCCESS_CP = CompletedProcess(
-    ["ansible-playbook"], 0, ANSIBLE_SUCCESS_OUTPUT, ""
-)
 
 # ansible keys are only first because we run after SUCCESS parsing ...
 EXPECTED_FAIL_STATS = {

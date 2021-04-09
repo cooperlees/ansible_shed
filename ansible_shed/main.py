@@ -37,7 +37,6 @@ async def async_main(debug: bool, config: str) -> int:
         LOG.error(f"{config} does not exist.")
         return 1
 
-    # TODO: Signal handlers + cleanup
     s = Shed(config_path)
     await asyncio.gather(s.prometheus_server(), s.ansible_runner())
     return 0
