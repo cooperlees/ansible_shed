@@ -42,9 +42,11 @@ class Shed:
 
         # Set and create log directory
         log_dir = self.config[SHED_CONFIG_SECTION].get("log_dir")
+        self.latest_log_symlink = None
         self.log_dir_path = Path(log_dir) if log_dir else None
         if self.log_dir_path:
             self.log_dir_path.mkdir(exist_ok=True)
+            self.latest_log_symlink = self.log_dir_path / "latest.log"
 
     def reload_config_vars(self) -> None:
         self.repo_path = Path(self.config[SHED_CONFIG_SECTION].get("repo_path"))
@@ -93,6 +95,18 @@ class Shed:
         now = datetime.now().strftime("%Y%m%d%H%M%S")
         return self.log_dir_path / f"ansible_shed_run_{now}.log"
 
+    def _update_latest_log_symlink(self, latest_log: Path) -> None:
+        if not self.latest_log_symlink:
+            LOG.debug("No latest log symlink set. Returning ...")
+            return
+
+        try:
+            if self.latest_log_symlink.exists():
+                self.latest_log_symlink.unlink()
+            self.latest_log_symlink.symlink_to(latest_log)
+        except OSError:
+            LOG.exception("Problem creating latest log symlink")
+
     def _run_ansible(self) -> Tuple[int, str]:
         """Run ansible-playbook and parse out statistics for prometheus"""
         run_log_path = self._create_logfile()
@@ -130,6 +144,7 @@ class Shed:
             return_code = cp.returncode
         else:
             ansible_output = ""
+            self._update_latest_log_symlink(run_log_path)
             with Popen(
                 cmd, stderr=PIPE, stdout=PIPE, cwd=self.repo_path, encoding="utf8"
             ) as p, run_log_path.open("w", buffering=1) as lf:

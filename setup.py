@@ -9,7 +9,7 @@ ptr_params = {
     "test_suite_timeout": 300,
     "required_coverage": {
         "ansible_shed/main.py": 44,
-        "ansible_shed/shed.py": 42,
+        "ansible_shed/shed.py": 41,
     },
     "run_flake8": True,
     "run_black": True,
