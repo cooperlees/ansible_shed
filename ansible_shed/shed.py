@@ -45,7 +45,7 @@ class Shed:
         self.latest_log_symlink = None
         self.log_dir_path = Path(log_dir) if log_dir else None
         if self.log_dir_path:
-            self.log_dir_path.mkdir(exist_ok=True)
+            self.log_dir_path.mkdir(exist_ok=True, parents=True)
             self.latest_log_symlink = self.log_dir_path / "latest.log"
 
     def reload_config_vars(self) -> None:
