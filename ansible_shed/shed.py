@@ -7,7 +7,6 @@ import shutil
 from collections import defaultdict
 from configparser import ConfigParser
 from datetime import datetime
-from git import Repo
 from json import dumps
 from pathlib import Path
 from random import randint
@@ -16,6 +15,7 @@ from time import time
 from typing import Dict, Optional, Tuple
 
 from aioprometheus import Gauge, Service
+from git import Repo
 
 
 LOG = logging.getLogger(__name__)
