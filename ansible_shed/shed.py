@@ -67,7 +67,7 @@ class Shed:
             repo = Repo(self.repo_path)
             with repo.git.custom_environment(GIT_SSH_COMMAND=git_ssh_cmd):
                 repo.remotes.origin.fetch()
-                repo.remotes.origin.refs.master.checkout()
+                repo.remotes.origin.refs.main.checkout()
             return
 
         # if we are at the point where init doesn't exist, git failed in the first pass
@@ -84,7 +84,7 @@ class Shed:
             self.repo_url,
             self.repo_path,
             env={"GIT_SSH_COMMAND": git_ssh_cmd},
-            branch="master",
+            branch="main",
         )
 
     def _create_logfile(self) -> Optional[Path]:
