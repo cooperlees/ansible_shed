@@ -231,7 +231,7 @@ class Shed:
     async def prometheus_server(self) -> None:
         """Use aioprometheus to server statistics to prometheus"""
         self.prom_service = Service()
-        await self.prom_service.start(addr=self.config[SHED_CONFIG_SECTION].get("prometheus_bind_addr") or "::", port=self.stats_port)
+        await self.prom_service.start(addr=self.config[SHED_CONFIG_SECTION].get("prometheus_bind_addr", "::"), port=self.stats_port)
         LOG.info(f"Serving prometheus metrics on: {self.prom_service.metrics_url}")
         await self._update_prom_stats()
 
