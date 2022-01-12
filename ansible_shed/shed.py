@@ -205,13 +205,41 @@ class Shed:
                 "UNIX timestamp of last time we updated the stats",
                 registry=self.prom_registry,
             ),
-            "ok": Gauge("ansible_ok", "Number of 'ok' (no change) plays", registry=self.prom_registry),
-            "changed": Gauge("ansible_changed", "Number of 'changed' plays", registry=self.prom_registry),
-            "unreachable": Gauge("ansible_unreachable", "Number of inaccessible hosts", registry=self.prom_registry),
-            "failed": Gauge("ansible_failed", "Number of failed plays on hosts", registry=self.prom_registry),
-            "skipped": Gauge("ansible_skipped", "Number of skipped plays on hosts", registry=self.prom_registry),
-            "rescued": Gauge("ansible_rescued", "Number of rescued plays on hosts", registry=self.prom_registry),
-            "ignored": Gauge("ansible_ignored", "Number of ignored plays on hosts", registry=self.prom_registry),
+            "ok": Gauge(
+                "ansible_ok",
+                "Number of 'ok' (no change) plays",
+                registry=self.prom_registry,
+            ),
+            "changed": Gauge(
+                "ansible_changed",
+                "Number of 'changed' plays",
+                registry=self.prom_registry,
+            ),
+            "unreachable": Gauge(
+                "ansible_unreachable",
+                "Number of inaccessible hosts",
+                registry=self.prom_registry,
+            ),
+            "failed": Gauge(
+                "ansible_failed",
+                "Number of failed plays on hosts",
+                registry=self.prom_registry,
+            ),
+            "skipped": Gauge(
+                "ansible_skipped",
+                "Number of skipped plays on hosts",
+                registry=self.prom_registry,
+            ),
+            "rescued": Gauge(
+                "ansible_rescued",
+                "Number of rescued plays on hosts",
+                registry=self.prom_registry,
+            ),
+            "ignored": Gauge(
+                "ansible_ignored",
+                "Number of ignored plays on hosts",
+                registry=self.prom_registry,
+            ),
         }
 
         while True:
