@@ -15,7 +15,7 @@ from time import time
 from typing import Dict, Optional, Tuple
 
 from aioprometheus import Gauge
-from aioprometheus.registry import Registry
+from aioprometheus.collectors import Registry
 from aioprometheus.service import Service
 from git import Repo
 
