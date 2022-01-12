@@ -15,6 +15,7 @@ from time import time
 from typing import Dict, Optional, Tuple
 
 from aioprometheus import Gauge
+from aioprometheus.collectors import Registry
 from aioprometheus.service import Service
 from git import Repo
 
@@ -192,22 +193,25 @@ class Shed:
             "ansible_last_run_returncode": Gauge(
                 "ansible_last_run_returncode",
                 "UNIX return code of the ansible-playbook process",
+                registry=self.prom_registry,
             ),
             "ansible_last_run_time": Gauge(
                 "ansible_last_run_time",
                 "Time in seconds it took the ansible-playbook process to execute",
+                registry=self.prom_registry,
             ),
             "ansible_stats_last_updated": Gauge(
                 "ansible_stats_last_updated",
                 "UNIX timestamp of last time we updated the stats",
+                registry=self.prom_registry,
             ),
-            "ok": Gauge("ansible_ok", "Number of 'ok' (no change) plays"),
-            "changed": Gauge("ansible_changed", "Number of 'changed' plays"),
-            "unreachable": Gauge("ansible_unreachable", "Number of inaccessible hosts"),
-            "failed": Gauge("ansible_failed", "Number of failed plays on hosts"),
-            "skipped": Gauge("ansible_skipped", "Number of skipped plays on hosts"),
-            "rescued": Gauge("ansible_rescued", "Number of rescued plays on hosts"),
-            "ignored": Gauge("ansible_ignored", "Number of ignored plays on hosts"),
+            "ok": Gauge("ansible_ok", "Number of 'ok' (no change) plays", registry=self.prom_registry),
+            "changed": Gauge("ansible_changed", "Number of 'changed' plays", registry=self.prom_registry),
+            "unreachable": Gauge("ansible_unreachable", "Number of inaccessible hosts", registry=self.prom_registry),
+            "failed": Gauge("ansible_failed", "Number of failed plays on hosts", registry=self.prom_registry),
+            "skipped": Gauge("ansible_skipped", "Number of skipped plays on hosts", registry=self.prom_registry),
+            "rescued": Gauge("ansible_rescued", "Number of rescued plays on hosts", registry=self.prom_registry),
+            "ignored": Gauge("ansible_ignored", "Number of ignored plays on hosts", registry=self.prom_registry),
         }
 
         while True:
@@ -229,13 +233,15 @@ class Shed:
 
     async def prometheus_server(self) -> None:
         """Use aioprometheus to server statistics to prometheus"""
-        self.prom_service = Service()
+        self.prom_registry = Registry()
+        self.prom_service = Service(registry=self.prom_registry)
         await self.prom_service.start(
             addr=self.config[SHED_CONFIG_SECTION].get("prometheus_bind_addr", "::"),
             port=self.stats_port,
         )
         LOG.info(f"Serving prometheus metrics on: {self.prom_service.metrics_url}")
         await self._update_prom_stats()
+        await self.prom_service.stop()
 
     # TODO: Make coroutine cleanly exit on shutdown
     async def ansible_runner(self) -> None:
