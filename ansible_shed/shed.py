@@ -14,7 +14,8 @@ from subprocess import PIPE, Popen, run
 from time import time
 from typing import Dict, Optional, Tuple
 
-from aioprometheus import Gauge, Service
+from aioprometheus import Gauge
+from aioprometheus.service import Service
 from git import Repo
 
 
@@ -208,8 +209,6 @@ class Shed:
             "rescued": Gauge("ansible_rescued", "Number of rescued plays on hosts"),
             "ignored": Gauge("ansible_ignored", "Number of ignored plays on hosts"),
         }
-        for gauge in prom_gauges.values():
-            self.prom_service.register(gauge)
 
         while True:
             await self.prom_stats_update.wait()
@@ -231,7 +230,10 @@ class Shed:
     async def prometheus_server(self) -> None:
         """Use aioprometheus to server statistics to prometheus"""
         self.prom_service = Service()
-        await self.prom_service.start(addr=self.config[SHED_CONFIG_SECTION].get("prometheus_bind_addr", "::"), port=self.stats_port)
+        await self.prom_service.start(
+            addr=self.config[SHED_CONFIG_SECTION].get("prometheus_bind_addr", "::"),
+            port=self.stats_port,
+        )
         LOG.info(f"Serving prometheus metrics on: {self.prom_service.metrics_url}")
         await self._update_prom_stats()
 
