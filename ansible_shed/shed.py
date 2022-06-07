@@ -14,10 +14,9 @@ from subprocess import PIPE, Popen, run
 from time import time
 from typing import Dict, Optional, Tuple
 
-from aioprometheus import Gauge
-from aioprometheus.collectors import Registry
+from aioprometheus.collectors import Gauge, Registry
 from aioprometheus.service import Service
-from git import Repo
+from git.repo.base import Repo
 
 
 LOG = logging.getLogger(__name__)

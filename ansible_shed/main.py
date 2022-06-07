@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Union
 
 import click
+
 from ansible_shed.shed import Shed
 
 
@@ -62,5 +63,5 @@ def main(ctx: click.core.Context, **kwargs: Any) -> None:
     ctx.exit(asyncio.run(async_main(**kwargs)))
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()
