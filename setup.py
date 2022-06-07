@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from os import environ
+
 from setuptools import setup
 
 
@@ -8,8 +10,8 @@ ptr_params = {
     "test_suite": "ansible_shed.tests.base",
     "test_suite_timeout": 300,
     "required_coverage": {
-        "ansible_shed/main.py": 44,
-        "ansible_shed/shed.py": 41,
+        "ansible_shed/main.py": 49,
+        "ansible_shed/shed.py": 40,
     },
     "run_black": True,
     "run_flake8": True,
@@ -18,14 +20,30 @@ ptr_params = {
 }
 
 
+ext_modules = []
+if "MYPYC_BUILD" in environ:
+    print("mypyc build time ...")
+    from mypyc.build import mypycify
+
+    ext_modules = mypycify(
+        [
+            "ansible_shed/__init__.py",
+            "ansible_shed/main.py",
+            "ansible_shed/shed.py",
+        ],
+        verbose=True,
+    )
+
+
 setup(
     name="ansible_shed",
-    version="2022.1.11",
+    version="2022.6.6",
     description=(
         "asyncio ansible tower like shed to run playbooks and have prometheus "
         + "collector stats"
     ),
     packages=["ansible_shed", "ansible_shed.tests"],
+    ext_modules=ext_modules,
     url="http://github.com/cooperlees/ansible_shed/",
     author="Cooper Lees",
     author_email="me@cooperlees.com",

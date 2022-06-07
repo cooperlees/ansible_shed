@@ -87,11 +87,11 @@ ansible_unreachable{hostname="home2.cooperlees.com"} 0
 
 We're not on PyPI as I don't feel the need (if we get popular that's easy to fix).
 
-- `pip install git+git://github.com/cooperlees/ansible_shed`
+- `pip install git+https://github.com/cooperlees/ansible_shed`
 
 or if you want `ansible` tools installed into the same Python environment use our *ansible* extra install:
 
-- `pip install git+git://github.com/cooperlees/ansible_shed#egg=ansible_shed[ansible]`
+- `pip install git+https://github.com/cooperlees/ansible_shed#egg=ansible_shed[ansible]`
 
 ### SystemD
 
@@ -113,3 +113,16 @@ Config Settings:
 - `interval`: Minutes between `ansible-playbook` runs
 - `start_splay`: Upper max of time to wait before first `ansible-playbook` run after starting the service - Code generates a random int from 0 to this upper max.
 - `port`: Statistics listening port + interval
+
+## mypyc build/install
+
+`ansible_shed` can be compiled with mypyc. The code is strictly typed and that allows for it to be converted to C and compiled.
+
+To enable, set a environment variable asking for a mypyc build
+
+*Only tested on Linux*
+
+- `export MYPYC_BUILD=1`
+- `pip install -U pip mypy setuptools wheel`
+- `pip install ansible_shed`
+
