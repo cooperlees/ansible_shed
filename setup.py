@@ -50,9 +50,8 @@ setup(
     classifiers=[
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3 :: Only",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
         "Development Status :: 3 - Alpha",
     ],
     entry_points={"console_scripts": ["ansible-shed = ansible_shed.main:main"]},
@@ -62,6 +61,6 @@ setup(
         "ansible": ["ansible"],
     },
     test_require=["ptr"],
-    python_requires=">=3.8",
+    python_requires=">=3.10",
     test_suite=ptr_params["test_suite"],
 )
