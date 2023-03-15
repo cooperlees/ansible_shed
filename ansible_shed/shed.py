@@ -120,6 +120,11 @@ class Shed:
         ]
         # Handle optional parameters
         if (
+            "ansible_show_diff" in self.config[SHED_CONFIG_SECTION]
+            and self.config[SHED_CONFIG_SECTION]["ansible_show_diff"]
+        ):
+            cmd.append("--diff")
+        if (
             "ansible_limit" in self.config[SHED_CONFIG_SECTION]
             and self.config[SHED_CONFIG_SECTION]["ansible_limit"]
         ):
