@@ -1,6 +1,6 @@
 [Unit]
 Description=Daemon to run ansible and exports stats ready for prometheus collection
-After=systemd-resolved.service network.target
+After=systemd-resolved.service network-online.target
 
 [Service]
 Type=simple
