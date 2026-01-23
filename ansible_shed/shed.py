@@ -49,7 +49,7 @@ class Shed:
             self.latest_log_symlink = self.log_dir_path / "latest.log"
 
     def reload_config_vars(self) -> None:
-        self.repo_path = Path(self.config[SHED_CONFIG_SECTION].get("repo_path", ""))
+        self.repo_path = Path(self.config[SHED_CONFIG_SECTION]["repo_path"])
         self.init_file = (
             Path(self.config[SHED_CONFIG_SECTION]["repo_path"])
             / self.config[SHED_CONFIG_SECTION]["ansible_playbook_init"]
@@ -58,7 +58,9 @@ class Shed:
         self.run_interval_seconds = (
             self.config[SHED_CONFIG_SECTION].getint("interval", fallback=60) * 60
         )
-        self.stats_port = self.config[SHED_CONFIG_SECTION].getint("port", fallback=8080)
+        self.stats_port = self.config[SHED_CONFIG_SECTION].getint(
+            "port", fallback=12345
+        )
 
     def _rebase_or_clone_repo(self) -> None:
         git_ssh_cmd = f"ssh -i {self.config[SHED_CONFIG_SECTION].get('repo_key')}"
