@@ -43,24 +43,27 @@ async def async_main(debug: bool, config: str) -> int:
     return 0
 
 
-@click.command(context_settings={"help_option_names": ["-h", "--help"]})  # type: ignore[untyped-decorator]
-@click.option(  # type: ignore[untyped-decorator]
-    "--debug",
-    is_flag=True,
-    callback=_handle_debug,
-    show_default=True,
-    help="Turn on debug logging",
-)
-@click.option(  # type: ignore[untyped-decorator]
-    "--config",
-    default="/etc/ansible_shed.ini",
-    show_default=True,
-    help="Path to ansible shed configuration",
-)
-@click.pass_context  # type: ignore[untyped-decorator]
-def main(ctx: click.core.Context, /, **kwargs: Any) -> None:
+def _main_impl(ctx: click.core.Context, /, **kwargs: Any) -> None:
     LOG.debug(f"Starting {sys.argv[0]}")
     ctx.exit(asyncio.run(async_main(**kwargs)))
+
+
+main = click.command(context_settings={"help_option_names": ["-h", "--help"]})(
+    click.option(
+        "--debug",
+        is_flag=True,
+        callback=_handle_debug,
+        show_default=True,
+        help="Turn on debug logging",
+    )(
+        click.option(
+            "--config",
+            default="/etc/ansible_shed.ini",
+            show_default=True,
+            help="Path to ansible shed configuration",
+        )(click.pass_context(_main_impl))
+    )
+)
 
 
 if __name__ == "__main__":  # pragma: no cover
