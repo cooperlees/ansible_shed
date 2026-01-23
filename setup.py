@@ -30,6 +30,7 @@ if "MYPYC_BUILD" in environ:
             "ansible_shed/main.py",
             "ansible_shed/shed.py",
         ],
+        opt_level="3",
         verbose=True,
     )
 
@@ -52,12 +53,12 @@ setup(
         "Development Status :: 3 - Alpha",
     ],
     entry_points={"console_scripts": ["ansible-shed = ansible_shed.main:main"]},
-    install_requires=["aioprometheus[aiohttp]", "click", "GitPython"],
+    install_requires=["aioprometheus[aiohttp]", "click>=8.0", "GitPython"],
     extras_require={
         # If you'd like the ansible toolset dependency installed
         "ansible": ["ansible"],
     },
-    test_require=["ptr"],
-    python_requires=">=3.14",
+    tests_require=["ptr"],
+    python_requires=">=3.10",
     test_suite=ptr_params["test_suite"],
 )
