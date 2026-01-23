@@ -83,7 +83,7 @@ class Shed:
         LOG.info(f"Cloning {self.repo_url} to {self.repo_path}")
 
         Repo.clone_from(
-            self.config[SHED_CONFIG_SECTION].get("repo_url", ""),
+            self.repo_url,
             self.repo_path,
             env={"GIT_SSH_COMMAND": git_ssh_cmd},
             branch="main",
