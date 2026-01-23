@@ -4,7 +4,6 @@ from os import environ
 
 from setuptools import setup
 
-
 ptr_params = {
     "entry_point_module": "ansible_shed/main",
     "test_suite": "ansible_shed.tests.base",
@@ -37,7 +36,7 @@ if "MYPYC_BUILD" in environ:
 
 setup(
     name="ansible_shed",
-    version="2023.3.15",
+    version="2026.1.23",
     description=(
         "asyncio ansible tower like shed to run playbooks and have prometheus "
         + "collector stats"
@@ -50,8 +49,6 @@ setup(
     classifiers=[
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3 :: Only",
-        "Programming Language :: Python :: 3.10",
-        "Programming Language :: Python :: 3.11",
         "Development Status :: 3 - Alpha",
     ],
     entry_points={"console_scripts": ["ansible-shed = ansible_shed.main:main"]},
@@ -61,6 +58,6 @@ setup(
         "ansible": ["ansible"],
     },
     test_require=["ptr"],
-    python_requires=">=3.10",
+    python_requires=">=3.14",
     test_suite=ptr_params["test_suite"],
 )

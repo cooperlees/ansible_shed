@@ -18,7 +18,6 @@ from aioprometheus.collectors import Gauge, Registry
 from aioprometheus.service import Service
 from git.repo.base import Repo
 
-
 LOG = logging.getLogger(__name__)
 SHED_CONFIG_SECTION = "ansible_shed"
 
@@ -50,16 +49,18 @@ class Shed:
             self.latest_log_symlink = self.log_dir_path / "latest.log"
 
     def reload_config_vars(self) -> None:
-        self.repo_path = Path(self.config[SHED_CONFIG_SECTION].get("repo_path"))
+        self.repo_path = Path(self.config[SHED_CONFIG_SECTION]["repo_path"])
         self.init_file = (
             Path(self.config[SHED_CONFIG_SECTION]["repo_path"])
             / self.config[SHED_CONFIG_SECTION]["ansible_playbook_init"]
         )
-        self.repo_url = self.config[SHED_CONFIG_SECTION].get("repo_url")
+        self.repo_url = self.config[SHED_CONFIG_SECTION]["repo_url"]
         self.run_interval_seconds = (
-            self.config[SHED_CONFIG_SECTION].getint("interval") * 60
+            self.config[SHED_CONFIG_SECTION].getint("interval", fallback=60) * 60
         )
-        self.stats_port = self.config[SHED_CONFIG_SECTION].getint("port")
+        self.stats_port = self.config[SHED_CONFIG_SECTION].getint(
+            "port", fallback=12345
+        )
 
     def _rebase_or_clone_repo(self) -> None:
         git_ssh_cmd = f"ssh -i {self.config[SHED_CONFIG_SECTION].get('repo_key')}"
@@ -280,7 +281,9 @@ class Shed:
         loop = asyncio.get_running_loop()
 
         if "start_splay" in self.config[SHED_CONFIG_SECTION]:
-            start_splay_int = self.config[SHED_CONFIG_SECTION].getint("start_splay")
+            start_splay_int = self.config[SHED_CONFIG_SECTION].getint(
+                "start_splay", fallback=0
+            )
             if start_splay_int > 0:
                 splay_time = randint(0, start_splay_int)
                 LOG.info(f"Waiting for the start splay sleep of {splay_time}s")

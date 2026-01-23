@@ -10,7 +10,6 @@ import click
 
 from ansible_shed.shed import Shed
 
-
 LOG = logging.getLogger(__name__)
 
 
@@ -58,7 +57,7 @@ async def async_main(debug: bool, config: str) -> int:
     help="Path to ansible shed configuration",
 )
 @click.pass_context
-def main(ctx: click.core.Context, **kwargs: Any) -> None:
+def main(ctx: click.core.Context, /, **kwargs: Any) -> None:
     LOG.debug(f"Starting {sys.argv[0]}")
     ctx.exit(asyncio.run(async_main(**kwargs)))
 
