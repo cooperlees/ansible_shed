@@ -54,7 +54,7 @@ class Shed:
             Path(self.config[SHED_CONFIG_SECTION]["repo_path"])
             / self.config[SHED_CONFIG_SECTION]["ansible_playbook_init"]
         )
-        self.repo_url = self.config[SHED_CONFIG_SECTION].get("repo_url")
+        self.repo_url = self.config[SHED_CONFIG_SECTION]["repo_url"]
         self.run_interval_seconds = (
             self.config[SHED_CONFIG_SECTION].getint("interval", fallback=60) * 60
         )
