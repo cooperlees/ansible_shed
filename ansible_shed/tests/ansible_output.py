@@ -12,7 +12,6 @@ from ansible_shed.tests.ansible_output_fixtures import (
     EXPECTED_SUCCESS_STATS,
 )
 
-
 SHED_CONFIG_PATH = Path(__file__).parent.parent.parent / "ansible_shed.ini"
 
 
