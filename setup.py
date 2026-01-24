@@ -59,6 +59,6 @@ setup(
         "ansible": ["ansible"],
     },
     tests_require=["ptr"],
-    python_requires=">=3.14",
+    python_requires=">=3.13",
     test_suite=ptr_params["test_suite"],
 )
