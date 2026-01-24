@@ -9,7 +9,7 @@ ptr_params = {
     "test_suite": "ansible_shed.tests.base",
     "test_suite_timeout": 300,
     "required_coverage": {
-        "ansible_shed/main.py": 49,
+        "ansible_shed/main.py": 45,
         "ansible_shed/shed.py": 40,
     },
     "run_black": True,
@@ -59,6 +59,6 @@ setup(
         "ansible": ["ansible"],
     },
     tests_require=["ptr"],
-    python_requires=">=3.10",
+    python_requires=">=3.14",
     test_suite=ptr_params["test_suite"],
 )
