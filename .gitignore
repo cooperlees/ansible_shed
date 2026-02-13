@@ -129,3 +129,6 @@ dmypy.json
 .pyre/
 
 .vscode/
+
+# Ansible vault password file
+.vault_pass

@@ -61,6 +61,7 @@ class Shed:
         self.stats_port = self.config[SHED_CONFIG_SECTION].getint(
             "port", fallback=12345
         )
+        self.vault_pass_file = self.config[SHED_CONFIG_SECTION].get("vault_pass_file")
 
     def _rebase_or_clone_repo(self) -> None:
         git_ssh_cmd = f"ssh -i {self.config[SHED_CONFIG_SECTION].get('repo_key')}"
@@ -70,6 +71,7 @@ class Shed:
             with repo.git.custom_environment(GIT_SSH_COMMAND=git_ssh_cmd):
                 repo.remotes.origin.fetch()
                 repo.remotes.origin.refs.main.checkout()
+            self._setup_vault_pass()
             return
 
         # if we are at the point where init doesn't exist, git failed in the first pass
@@ -88,6 +90,28 @@ class Shed:
             env={"GIT_SSH_COMMAND": git_ssh_cmd},
             branch="main",
         )
+
+        self._setup_vault_pass()
+
+    def _setup_vault_pass(self) -> None:
+        """Copy vault password file to .vault_pass in repo if configured"""
+        vault_pass_dest = self.repo_path / ".vault_pass"
+
+        if not self.vault_pass_file:
+            LOG.info("No vault_pass_file configured in config")
+            return
+
+        vault_pass_source = Path(self.vault_pass_file)
+        if not vault_pass_source.exists():
+            LOG.warning(
+                f"Configured vault_pass_file '{self.vault_pass_file}' does not exist"
+            )
+            return
+
+        LOG.info(
+            f"Copying vault password file from {vault_pass_source} to {vault_pass_dest}"
+        )
+        shutil.copy(vault_pass_source, vault_pass_dest)
 
     def _create_logfile(self) -> Optional[Path]:
         """Create a timestamped logfile"""
@@ -119,6 +143,10 @@ class Shed:
             self.config[SHED_CONFIG_SECTION]["ansible_hosts_inventory"],
             self.config[SHED_CONFIG_SECTION]["ansible_playbook_init"],
         ]
+        # Add vault password file if it exists
+        vault_pass_file = self.repo_path / ".vault_pass"
+        if vault_pass_file.exists():
+            cmd.extend(["--vault-password-file", str(vault_pass_file)])
         # Handle optional parameters
         if (
             "ansible_show_diff" in self.config[SHED_CONFIG_SECTION]
