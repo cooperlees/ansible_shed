@@ -22,7 +22,7 @@ if "MYPYC_BUILD" in environ:
 
 setup(
     name="ansible_shed",
-    version="2026.1.23",
+    version="2026.2.13",
     description=(
         "asyncio ansible tower like shed to run playbooks and have prometheus "
         + "collector stats"
