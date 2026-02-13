@@ -112,6 +112,8 @@ class Shed:
             f"Copying vault password file from {vault_pass_source} to {vault_pass_dest}"
         )
         shutil.copy(vault_pass_source, vault_pass_dest)
+        # Set restrictive permissions (owner read/write only) for security
+        vault_pass_dest.chmod(0o600)
 
     def _create_logfile(self) -> Optional[Path]:
         """Create a timestamped logfile"""

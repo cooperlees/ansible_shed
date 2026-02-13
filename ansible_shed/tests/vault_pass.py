@@ -79,6 +79,8 @@ ansible_playbook_init=site.yaml
         vault_dest = self.repo_path / ".vault_pass"
         self.assertTrue(vault_dest.exists())
         self.assertEqual(vault_dest.read_text(), "test_password_123")
+        # Check that file has restrictive permissions (owner read/write only)
+        self.assertEqual(vault_dest.stat().st_mode & 0o777, 0o600)
 
     @patch("pathlib.Path.mkdir")
     def test_setup_vault_pass_no_config(self, mock_mkdir: Mock) -> None:
