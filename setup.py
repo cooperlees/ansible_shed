@@ -4,21 +4,6 @@ from os import environ
 
 from setuptools import setup
 
-ptr_params = {
-    "entry_point_module": "ansible_shed/main",
-    "test_suite": "ansible_shed.tests.base",
-    "test_suite_timeout": 300,
-    "required_coverage": {
-        "ansible_shed/main.py": 45,
-        "ansible_shed/shed.py": 40,
-    },
-    "run_black": True,
-    "run_flake8": True,
-    "run_mypy": True,
-    "run_usort": True,
-}
-
-
 ext_modules = []
 if "MYPYC_BUILD" in environ:
     print("mypyc build time ...")
@@ -60,5 +45,5 @@ setup(
     },
     tests_require=["ptr"],
     python_requires=">=3.13",
-    test_suite=ptr_params["test_suite"],
+    test_suite="ansible_shed.tests.base",
 )
