@@ -113,6 +113,7 @@ Config Settings:
 - `interval`: Minutes between `ansible-playbook` runs
 - `start_splay`: Upper max of time to wait before first `ansible-playbook` run after starting the service - Code generates a random int from 0 to this upper max.
 - `port`: Statistics listening port + interval
+- `vault_pass_file`: (Optional) Path to Ansible vault password file. If set, this file will be copied to `.vault_pass` in the checked out repo and ansible-playbook will be run with `--vault-password-file` flag.
 
 ## mypyc build/install
 
