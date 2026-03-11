@@ -12,7 +12,6 @@ from pathlib import Path
 from random import randint
 from subprocess import PIPE, Popen, run
 from time import time
-from typing import Dict, List, Optional, Tuple
 
 from aioprometheus.collectors import Gauge, Registry
 from aioprometheus.service import Service
@@ -37,9 +36,9 @@ class Shed:
         self.config_path = config_path
         self.reload_config_vars()
 
-        self.prom_stats: Dict[str, int] = defaultdict(int)
+        self.prom_stats: dict[str, int] = defaultdict(int)
         self.prom_stats_update = asyncio.Event()
-        self.version_check_packages: List[Dict[str, str]] = []
+        self.version_check_packages: list[dict[str, str]] = []
 
         # Set and create log directory
         log_dir = self.config[SHED_CONFIG_SECTION].get("log_dir")
@@ -119,7 +118,7 @@ class Shed:
         # Set restrictive permissions (owner read/write only) for security
         vault_pass_dest.chmod(0o600)
 
-    def _create_logfile(self) -> Optional[Path]:
+    def _create_logfile(self) -> Path | None:
         """Create a timestamped logfile"""
         if not self.log_dir_path:
             return None
@@ -139,7 +138,7 @@ class Shed:
         except OSError:
             LOG.exception("Problem creating latest log symlink")
 
-    def _run_ansible(self) -> Tuple[int, str]:
+    def _run_ansible(self) -> tuple[int, str]:
         """Run ansible-playbook and parse out statistics for prometheus"""
         run_log_path = self._create_logfile()
 
@@ -325,7 +324,7 @@ class Shed:
             "Package that needs an upgrade (value=1)",
             registry=self.prom_registry,
         )
-        prev_pkg_labels: List[Dict[str, str]] = []
+        prev_pkg_labels: list[dict[str, str]] = []
 
         while True:
             await self.prom_stats_update.wait()
@@ -341,7 +340,7 @@ class Shed:
                 _, hostname, metric_name = k.split("_", maxsplit=2)
                 prom_gauges[metric_name].set({"hostname": hostname}, v)
 
-            current_pkg_labels: List[Dict[str, str]] = []
+            current_pkg_labels: list[dict[str, str]] = []
             for pkg in self.version_check_packages:
                 labels = {
                     "name": pkg["name"],
@@ -355,7 +354,7 @@ class Shed:
             # Remove gauge entries for packages no longer in the list
             for old_labels in prev_pkg_labels:
                 if old_labels not in current_pkg_labels:
-                    version_check_state_package_gauge.remove(old_labels)
+                    del version_check_state_package_gauge.values[old_labels]  # type: ignore[no-untyped-call]
             prev_pkg_labels = current_pkg_labels
 
             LOG.info(f"Updated {metric_count} metrics")
