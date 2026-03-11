@@ -6,13 +6,12 @@ import re
 import shutil
 from collections import defaultdict
 from configparser import ConfigParser
-from datetime import datetime
-from json import dumps
+from datetime import datetime, timezone
+from json import dumps, loads
 from pathlib import Path
 from random import randint
 from subprocess import PIPE, Popen, run
 from time import time
-from typing import Dict, Optional, Tuple
 
 from aioprometheus.collectors import Gauge, Registry
 from aioprometheus.service import Service
@@ -37,8 +36,9 @@ class Shed:
         self.config_path = config_path
         self.reload_config_vars()
 
-        self.prom_stats: Dict[str, int] = defaultdict(int)
+        self.prom_stats: dict[str, int] = defaultdict(int)
         self.prom_stats_update = asyncio.Event()
+        self.version_check_packages: list[dict[str, str]] = []
 
         # Set and create log directory
         log_dir = self.config[SHED_CONFIG_SECTION].get("log_dir")
@@ -62,6 +62,9 @@ class Shed:
             "port", fallback=12345
         )
         self.vault_pass_file = self.config[SHED_CONFIG_SECTION].get("vault_pass_file")
+        self.version_check_state_enabled = self.config[SHED_CONFIG_SECTION].getboolean(
+            "version_check_state_enabled", fallback=False
+        )
 
     def _rebase_or_clone_repo(self) -> None:
         git_ssh_cmd = f"ssh -i {self.config[SHED_CONFIG_SECTION].get('repo_key')}"
@@ -115,7 +118,7 @@ class Shed:
         # Set restrictive permissions (owner read/write only) for security
         vault_pass_dest.chmod(0o600)
 
-    def _create_logfile(self) -> Optional[Path]:
+    def _create_logfile(self) -> Path | None:
         """Create a timestamped logfile"""
         if not self.log_dir_path:
             return None
@@ -135,7 +138,7 @@ class Shed:
         except OSError:
             LOG.exception("Problem creating latest log symlink")
 
-    def _run_ansible(self) -> Tuple[int, str]:
+    def _run_ansible(self) -> tuple[int, str]:
         """Run ansible-playbook and parse out statistics for prometheus"""
         run_log_path = self._create_logfile()
 
@@ -222,6 +225,35 @@ class Shed:
         self.prom_stats["ansible_stats_last_updated"] = int(time())
         self.prom_stats_update.set()
 
+    def parse_version_check_state(self) -> None:
+        """Parse version_check_state.json and update prometheus stats if enabled"""
+        if not self.version_check_state_enabled:
+            return
+
+        version_check_state_file = self.repo_path / "version_check_state.json"
+        if not version_check_state_file.exists():
+            LOG.warning(
+                f"version_check_state_enabled is set but {version_check_state_file} does not exist"
+            )
+            return
+
+        with version_check_state_file.open("r") as f:
+            state = loads(f.read())
+
+        results = state.get("results", [])
+        self.prom_stats["version_check_state_results"] = len(results)
+
+        checked_at_str = state.get("checked_at", "")
+        if checked_at_str:
+            checked_at = datetime.strptime(
+                checked_at_str, "%Y-%m-%dT%H:%M:%SZ"
+            ).replace(tzinfo=timezone.utc)
+            self.prom_stats["version_check_state_checked_at"] = int(
+                checked_at.timestamp()
+            )
+
+        self.version_check_packages = results
+
     async def _update_prom_stats(self) -> None:
         """Check for new stats every 30 seconds - Only run if last updated is newer"""
         prom_gauges = {
@@ -275,7 +307,24 @@ class Shed:
                 "Number of ignored plays on hosts",
                 registry=self.prom_registry,
             ),
+            "version_check_state_results": Gauge(
+                "version_check_state_results",
+                "Total number of packages needing upgrades",
+                registry=self.prom_registry,
+            ),
+            "version_check_state_checked_at": Gauge(
+                "version_check_state_checked_at",
+                "Timestamp (seconds since epoch) of last version check",
+                registry=self.prom_registry,
+            ),
         }
+
+        version_check_state_package_gauge = Gauge(
+            "version_check_state_package",
+            "Package that needs an upgrade (value=1)",
+            registry=self.prom_registry,
+        )
+        prev_pkg_labels: list[dict[str, str]] = []
 
         while True:
             await self.prom_stats_update.wait()
@@ -290,6 +339,23 @@ class Shed:
 
                 _, hostname, metric_name = k.split("_", maxsplit=2)
                 prom_gauges[metric_name].set({"hostname": hostname}, v)
+
+            current_pkg_labels: list[dict[str, str]] = []
+            for pkg in self.version_check_packages:
+                labels = {
+                    "name": pkg["name"],
+                    "current_version": pkg["current_version"],
+                    "latest_version": pkg["latest_version"],
+                }
+                version_check_state_package_gauge.set(labels, 1)
+                current_pkg_labels.append(labels)
+                metric_count += 1
+
+            # Remove gauge entries for packages no longer in the list
+            for old_labels in prev_pkg_labels:
+                if old_labels not in current_pkg_labels:
+                    del version_check_state_package_gauge.values[old_labels]  # type: ignore[no-untyped-call]
+            prev_pkg_labels = current_pkg_labels
 
             LOG.info(f"Updated {metric_count} metrics")
             self.prom_stats_update.clear()
@@ -336,6 +402,8 @@ class Shed:
             await loop.run_in_executor(
                 None, self.parse_ansible_stats, ansible_output, returncode
             )
+            # Parse version check state if enabled
+            await loop.run_in_executor(None, self.parse_version_check_state)
 
             run_finish_time = time()
             run_time = int(run_finish_time - run_start_time)
