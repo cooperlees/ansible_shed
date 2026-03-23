@@ -132,9 +132,7 @@ version_check_state_enabled=false
         self.assertEqual(shed.version_check_packages[3]["name"], "coredns")
 
     @patch("pathlib.Path.mkdir")
-    def test_version_check_data_ready_before_prom_event(
-        self, mock_mkdir: Mock
-    ) -> None:
+    def test_version_check_data_ready_before_prom_event(self, mock_mkdir: Mock) -> None:
         """Test that version_check data is populated before prom_stats_update fires.
 
         parse_version_check_state must run before parse_ansible_stats in the
@@ -175,9 +173,7 @@ version_check_state_enabled=false
             await loop.run_in_executor(None, shed._run_ansible)
             # Mirror the actual ansible_runner call order
             await loop.run_in_executor(None, shed.parse_version_check_state)
-            await loop.run_in_executor(
-                None, shed.parse_ansible_stats, "", 0
-            )
+            await loop.run_in_executor(None, shed.parse_ansible_stats, "", 0)
 
         asyncio.run(run_one_iteration())
 
