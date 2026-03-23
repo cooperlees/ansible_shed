@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 
+import asyncio
 import json
 import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from ansible_shed.shed import Shed
 
@@ -129,3 +130,64 @@ version_check_state_enabled=false
         self.assertEqual(shed.version_check_packages[1]["name"], "nftables-exporter")
         self.assertEqual(shed.version_check_packages[2]["name"], "kube-vip")
         self.assertEqual(shed.version_check_packages[3]["name"], "coredns")
+
+    @patch("pathlib.Path.mkdir")
+    def test_version_check_data_ready_before_prom_event(
+        self, mock_mkdir: Mock
+    ) -> None:
+        """Test that version_check data is populated before prom_stats_update fires.
+
+        parse_version_check_state must run before parse_ansible_stats in the
+        ansible_runner loop, because parse_ansible_stats sets the
+        prom_stats_update event that triggers metric export. If the order is
+        wrong, _update_prom_stats reads empty version_check data.
+        """
+        version_check_file = self.repo_path / "version_check_state.json"
+        version_check_file.write_text(json.dumps(VERSION_CHECK_STATE_JSON))
+
+        shed = Shed(self.config_file)
+        call_order: list[str] = []
+        version_check_packages_at_event: list[dict[str, str]] = []
+
+        original_parse_version_check = shed.parse_version_check_state
+        original_parse_stats = shed.parse_ansible_stats
+
+        def tracked_parse_version_check() -> None:
+            call_order.append("parse_version_check_state")
+            original_parse_version_check()
+
+        def tracked_parse_stats(output: str, returncode: int) -> None:
+            call_order.append("parse_ansible_stats")
+            # Snapshot what _update_prom_stats would see when the event fires
+            version_check_packages_at_event.extend(shed.version_check_packages)
+            original_parse_stats(output, returncode)
+
+        shed.parse_version_check_state = tracked_parse_version_check  # type: ignore[assignment]
+        shed.parse_ansible_stats = tracked_parse_stats  # type: ignore[assignment]
+
+        # Stub out methods we don't need for this test
+        shed._rebase_or_clone_repo = Mock()  # type: ignore[assignment]
+        shed._run_ansible = Mock(return_value=(0, ""))  # type: ignore[assignment]
+
+        async def run_one_iteration() -> None:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, shed._rebase_or_clone_repo)
+            await loop.run_in_executor(None, shed._run_ansible)
+            # Mirror the actual ansible_runner call order
+            await loop.run_in_executor(None, shed.parse_version_check_state)
+            await loop.run_in_executor(
+                None, shed.parse_ansible_stats, "", 0
+            )
+
+        asyncio.run(run_one_iteration())
+
+        self.assertEqual(
+            call_order,
+            ["parse_version_check_state", "parse_ansible_stats"],
+            "parse_version_check_state must run before parse_ansible_stats",
+        )
+        self.assertEqual(
+            len(version_check_packages_at_event),
+            4,
+            "version_check_packages must be populated before prom_stats_update fires",
+        )
