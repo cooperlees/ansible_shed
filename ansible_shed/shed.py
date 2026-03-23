@@ -398,12 +398,14 @@ class Shed:
             returncode, ansible_output = await loop.run_in_executor(
                 None, self._run_ansible
             )
-            # Parse ansible success or error
+            # Parse version check state before ansible stats because
+            # parse_ansible_stats sets the prom_stats_update event that
+            # triggers _update_prom_stats to export metrics.
+            await loop.run_in_executor(None, self.parse_version_check_state)
+            # Parse ansible success or error (sets prom_stats_update event)
             await loop.run_in_executor(
                 None, self.parse_ansible_stats, ansible_output, returncode
             )
-            # Parse version check state if enabled
-            await loop.run_in_executor(None, self.parse_version_check_state)
 
             run_finish_time = time()
             run_time = int(run_finish_time - run_start_time)
