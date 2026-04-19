@@ -154,9 +154,7 @@ class Shed:
         if pause_until_epoch is None:
             return aiohttp.web.json_response(
                 {
-                    "error": (
-                        "invalid timestamp format, use UNIX epoch seconds " "or ISO8601"
-                    )
+                    "error": "invalid timestamp format, use UNIX epoch seconds or ISO8601"
                 },
                 status=400,
             )
@@ -562,6 +560,11 @@ class Shed:
 
             run_finish_time = time()
             run_time = int(run_finish_time - run_start_time)
+            if run_time > self.run_interval_seconds:
+                LOG.warning(
+                    "Ansible run exceeded configured interval by "
+                    f"{run_time - self.run_interval_seconds}s"
+                )
             sleep_time = max(self.run_interval_seconds - run_time, 0)
             LOG.info(f"Finished ansible run in {run_time}s. Sleeping for {sleep_time}s")
             LOG.debug(f"Stats:\n{dumps(self.prom_stats, indent=2, sort_keys=True)}")
