@@ -78,6 +78,10 @@ ansible_unreachable{hostname="home2.cooperlees.com"} 0
 
 - Avaliable http://IP:PORT/metrics
   - All [aioprometheus](https://github.com/claws/aioprometheus) powered
+- Additional REST APIs (token-authenticated using `X-API-Token` header):
+  - `POST /pause` with `timestamp` in JSON body (UNIX epoch or ISO8601) or query
+  - `POST /force-run` (also accepts `POST /force_run`)
+  - `GET /healthz` validates `ansible-playbook --help` and `git --help`
 
 ## Grafana Dashboard
 
@@ -114,6 +118,7 @@ Config Settings:
 - `start_splay`: Upper max of time to wait before first `ansible-playbook` run after starting the service - Code generates a random int from 0 to this upper max.
 - `port`: Statistics listening port + interval
 - `vault_pass_file`: (Optional) Path to Ansible vault password file. If set, this file will be copied to `.vault_pass` in the checked out repo and ansible-playbook will be run with `--vault-password-file` flag.
+- `api_token`: API token required in `X-API-Token` for `/pause`, `/force-run`, and `/healthz`
 
 ## mypyc build/install
 
@@ -126,4 +131,3 @@ To enable, set a environment variable asking for a mypyc build
 - `export MYPYC_BUILD=1`
 - `pip install -U pip mypy setuptools wheel`
 - `pip install ansible_shed`
-

@@ -5,16 +5,19 @@ import logging
 import re
 import shutil
 from collections import defaultdict
+from collections.abc import Mapping
 from configparser import ConfigParser
 from datetime import datetime, timezone
-from json import dumps, loads
+from json import JSONDecodeError, dumps, loads
 from pathlib import Path
 from random import randint
-from subprocess import PIPE, Popen, run
+from subprocess import DEVNULL, PIPE, Popen, run
 from time import time
 
+import aiohttp
+import aiohttp.web
+from aioprometheus import render
 from aioprometheus.collectors import Gauge, Registry
-from aioprometheus.service import Service
 from git.repo.base import Repo
 
 LOG = logging.getLogger(__name__)
@@ -38,7 +41,9 @@ class Shed:
 
         self.prom_stats: dict[str, int] = defaultdict(int)
         self.prom_stats_update = asyncio.Event()
+        self.force_run_requested = asyncio.Event()
         self.version_check_packages: list[dict[str, str]] = []
+        self.paused_until_epoch: int | None = None
 
         # Set and create log directory
         log_dir = self.config[SHED_CONFIG_SECTION].get("log_dir")
@@ -65,6 +70,126 @@ class Shed:
         self.version_check_state_enabled = self.config[SHED_CONFIG_SECTION].getboolean(
             "version_check_state_enabled", fallback=False
         )
+        self.api_token = self.config[SHED_CONFIG_SECTION].get("api_token")
+
+    def _has_valid_api_token(self, headers: Mapping[str, str]) -> bool:
+        if not self.api_token:
+            return False
+        return headers.get("X-API-Token") == self.api_token
+
+    @staticmethod
+    def _parse_timestamp_to_epoch(timestamp_raw: str) -> int | None:
+        timestamp_str = timestamp_raw.strip()
+        if not timestamp_str:
+            return None
+        if timestamp_str.isdigit():
+            return int(timestamp_str)
+        try:
+            return int(
+                datetime.fromisoformat(
+                    timestamp_str.replace("Z", "+00:00")
+                ).timestamp()
+            )
+        except ValueError:
+            return None
+
+    def _is_paused(self) -> bool:
+        if self.paused_until_epoch is None:
+            return False
+        return int(time()) < self.paused_until_epoch
+
+    def _healthcheck(self) -> dict[str, object]:
+        checks: dict[str, dict[str, object]] = {}
+        for binary_name in ("ansible-playbook", "git"):
+            binary_path = shutil.which(binary_name)
+            if not binary_path:
+                checks[binary_name] = {"ok": False, "reason": "not found"}
+                continue
+            returncode = run(
+                [binary_path, "--help"],
+                stdout=DEVNULL,
+                stderr=DEVNULL,
+                check=False,
+            ).returncode
+            checks[binary_name] = {"ok": returncode == 0, "returncode": returncode}
+        return {"ok": all(c["ok"] for c in checks.values()), "checks": checks}
+
+    async def _wait_for_force_run(self, timeout_seconds: int) -> bool:
+        if timeout_seconds <= 0:
+            if not self.force_run_requested.is_set():
+                return False
+            self.force_run_requested.clear()
+            return True
+        try:
+            await asyncio.wait_for(self.force_run_requested.wait(), timeout_seconds)
+        except asyncio.TimeoutError:
+            return False
+        self.force_run_requested.clear()
+        return True
+
+    async def _handle_metrics(
+        self, request: aiohttp.web.Request
+    ) -> aiohttp.web.Response:
+        content, http_headers = render(
+            self.prom_registry, request.headers.getall("Accept", [])
+        )
+        return aiohttp.web.Response(body=content, headers=http_headers)
+
+    async def _handle_pause(self, request: aiohttp.web.Request) -> aiohttp.web.Response:
+        if not self._has_valid_api_token(request.headers):
+            return aiohttp.web.json_response({"error": "unauthorized"}, status=401)
+        try:
+            body = await request.json()
+        except (JSONDecodeError, aiohttp.ContentTypeError):
+            body = {}
+
+        timestamp_raw = body.get("timestamp") if isinstance(body, dict) else None
+        if timestamp_raw is None:
+            timestamp_raw = request.query.get("timestamp")
+        if timestamp_raw is None:
+            return aiohttp.web.json_response(
+                {"error": "missing timestamp in JSON body or query"},
+                status=400,
+            )
+
+        pause_until_epoch = self._parse_timestamp_to_epoch(str(timestamp_raw))
+        if pause_until_epoch is None:
+            return aiohttp.web.json_response(
+                {
+                    "error": (
+                        "invalid timestamp format, use UNIX epoch seconds "
+                        "or ISO8601"
+                    )
+                },
+                status=400,
+            )
+        self.paused_until_epoch = pause_until_epoch
+        LOG.info(
+            "Pause requested via API until "
+            f"{datetime.fromtimestamp(pause_until_epoch, tz=timezone.utc).isoformat()}"
+        )
+        return aiohttp.web.json_response(
+            {"paused_until_epoch": pause_until_epoch, "paused": self._is_paused()}
+        )
+
+    async def _handle_force_run(
+        self, request: aiohttp.web.Request
+    ) -> aiohttp.web.Response:
+        if not self._has_valid_api_token(request.headers):
+            return aiohttp.web.json_response({"error": "unauthorized"}, status=401)
+        self.force_run_requested.set()
+        LOG.info("Force run requested via API")
+        return aiohttp.web.json_response({"status": "scheduled"})
+
+    async def _handle_healthz(
+        self, request: aiohttp.web.Request
+    ) -> aiohttp.web.Response:
+        if not self._has_valid_api_token(request.headers):
+            return aiohttp.web.json_response({"error": "unauthorized"}, status=401)
+        loop = asyncio.get_running_loop()
+        health = await loop.run_in_executor(None, self._healthcheck)
+        status = 200 if bool(health.get("ok")) else 503
+        return aiohttp.web.json_response(health, status=status)
 
     def _rebase_or_clone_repo(self) -> None:
         git_ssh_cmd = f"ssh -i {self.config[SHED_CONFIG_SECTION].get('repo_key')}"
@@ -363,18 +488,29 @@ class Shed:
     async def prometheus_server(self) -> None:
         """Use aioprometheus to server statistics to prometheus"""
         self.prom_registry = Registry()
-        self.prom_service = Service(registry=self.prom_registry)
-        await self.prom_service.start(
-            addr=self.config[SHED_CONFIG_SECTION].get("prometheus_bind_addr", "::"),
-            port=self.stats_port,
-        )
-        LOG.info(f"Serving prometheus metrics on: {self.prom_service.metrics_url}")
+        app = aiohttp.web.Application()
+        app.router.add_route("GET", "/metrics", self._handle_metrics)
+        app.router.add_route("POST", "/pause", self._handle_pause)
+        app.router.add_route("POST", "/force-run", self._handle_force_run)
+        app.router.add_route("POST", "/force_run", self._handle_force_run)
+        app.router.add_route("GET", "/healthz", self._handle_healthz)
+        runner = aiohttp.web.AppRunner(app, shutdown_timeout=2.0)
+        await runner.setup()
+        bind_addr = self.config[SHED_CONFIG_SECTION].get("prometheus_bind_addr", "::")
+        site = aiohttp.web.TCPSite(runner, bind_addr, self.stats_port)
+        await site.start()
+        LOG.info(f"Serving prometheus metrics on: http://{bind_addr}:{self.stats_port}/metrics")
+        if not self.api_token:
+            LOG.warning(
+                "api_token is not configured; authenticated API endpoints are unavailable"
+            )
         await self._update_prom_stats()
-        await self.prom_service.stop()
+        await runner.cleanup()
 
     # TODO: Make coroutine cleanly exit on shutdown
     async def ansible_runner(self) -> None:
         loop = asyncio.get_running_loop()
+        force_run_once = False
 
         if "start_splay" in self.config[SHED_CONFIG_SECTION]:
             start_splay_int = self.config[SHED_CONFIG_SECTION].getint(
@@ -392,6 +528,22 @@ class Shed:
                 None, _load_shed_config, self.config_path
             )
             self.reload_config_vars()
+
+            if self.force_run_requested.is_set():
+                self.force_run_requested.clear()
+                force_run_once = True
+
+            if self._is_paused() and not force_run_once:
+                if self.paused_until_epoch is not None:
+                    pause_until = datetime.fromtimestamp(
+                        self.paused_until_epoch, tz=timezone.utc
+                    ).isoformat()
+                    LOG.info(f"Paused until {pause_until}, skipping this runtime")
+                force_run_once = await self._wait_for_force_run(self.run_interval_seconds)
+                if force_run_once:
+                    LOG.info("Force run requested while paused; running once")
+                continue
+            force_run_once = False
             # Rebase ansible repo
             await loop.run_in_executor(None, self._rebase_or_clone_repo)
             # Run ansible playbook
@@ -409,7 +561,9 @@ class Shed:
 
             run_finish_time = time()
             run_time = int(run_finish_time - run_start_time)
-            sleep_time = self.run_interval_seconds - run_time
+            sleep_time = max(self.run_interval_seconds - run_time, 0)
             LOG.info(f"Finished ansible run in {run_time}s. Sleeping for {sleep_time}s")
             LOG.debug(f"Stats:\n{dumps(self.prom_stats, indent=2, sort_keys=True)}")
-            await asyncio.sleep(sleep_time)
+            force_run_once = await self._wait_for_force_run(sleep_time)
+            if force_run_once:
+                LOG.info("Force run requested; starting next run now")
