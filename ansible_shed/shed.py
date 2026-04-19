@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from json import dumps, JSONDecodeError, loads
 from pathlib import Path
 from random import randint
-from subprocess import DEVNULL, PIPE, Popen, run, TimeoutExpired
+from subprocess import PIPE, Popen, run
 from time import time
 
 import aiohttp
@@ -26,6 +26,7 @@ from git.repo.base import Repo
 LOG = logging.getLogger(__name__)
 SHED_CONFIG_SECTION = "ansible_shed"
 DEFAULT_API_TOKEN_PLACEHOLDER = "change-me-random-token"
+HEALTHCHECK_TIMEOUT_SECONDS = 5
 
 
 def _load_shed_config(config_path: Path) -> ConfigParser:
@@ -147,28 +148,46 @@ class Shed:
             pass
         return f"http://{host}:{self.stats_port}/metrics"
 
-    def _healthcheck(self) -> dict[str, object]:
-        checks: dict[str, dict[str, object]] = {}
-        for binary_name in ("ansible-playbook", "git"):
-            binary_path = shutil.which(binary_name)
-            if not binary_path:
-                checks[binary_name] = {"ok": False, "reason": "not found"}
-                continue
+    async def _healthcheck_command(
+        self, binary_name: str
+    ) -> tuple[str, dict[str, object]]:
+        binary_path = shutil.which(binary_name)
+        if not binary_path:
+            return (binary_name, {"ok": False, "reason": "not found"})
+        try:
+            process = await asyncio.create_subprocess_exec(
+                binary_path,
+                "--help",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+        except OSError as err:
+            return (binary_name, {"ok": False, "reason": str(err)})
+        try:
+            await asyncio.wait_for(
+                process.wait(),
+                timeout=HEALTHCHECK_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            process.kill()
             try:
-                returncode = run(
-                    [binary_path, "--help"],
-                    stdout=DEVNULL,
-                    stderr=DEVNULL,
-                    check=False,
-                    timeout=5,
-                ).returncode
-            except TimeoutExpired:
-                checks[binary_name] = {"ok": False, "reason": "timeout"}
-                continue
-            except OSError as err:
-                checks[binary_name] = {"ok": False, "reason": str(err)}
-                continue
-            checks[binary_name] = {"ok": returncode == 0, "returncode": returncode}
+                await process.wait()
+            except ProcessLookupError:
+                pass
+            return (binary_name, {"ok": False, "reason": "timeout"})
+        return (
+            binary_name,
+            {"ok": process.returncode == 0, "returncode": process.returncode},
+        )
+
+    async def _healthcheck(self) -> dict[str, object]:
+        checks = {
+            binary_name: check
+            for binary_name, check in await asyncio.gather(
+                self._healthcheck_command("ansible-playbook"),
+                self._healthcheck_command("git"),
+            )
+        }
         return {"ok": all(c["ok"] for c in checks.values()), "checks": checks}
 
     async def _wait_for_force_run(self, timeout_seconds: int) -> bool:
@@ -240,8 +259,7 @@ class Shed:
     ) -> aiohttp.web.Response:
         if not self._has_valid_api_token(request.headers):
             return aiohttp.web.json_response({"error": "unauthorized"}, status=401)
-        loop = asyncio.get_running_loop()
-        health = await loop.run_in_executor(None, self._healthcheck)
+        health = await self._healthcheck()
         status = 200 if bool(health.get("ok")) else 503
         return aiohttp.web.json_response(health, status=status)
 

@@ -6,9 +6,8 @@ import tempfile
 import unittest
 from collections.abc import Mapping
 from pathlib import Path
-from subprocess import TimeoutExpired
 from typing import cast
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from ansible_shed.shed import Shed
 
@@ -59,29 +58,37 @@ api_token=test-token
         self.assertIsNone(shed._parse_timestamp_to_epoch("bad"))
 
     @patch("pathlib.Path.mkdir")
-    @patch("ansible_shed.shed.run")
+    @patch("ansible_shed.shed.asyncio.create_subprocess_exec")
     @patch("ansible_shed.shed.shutil.which")
     def test_healthcheck(
-        self, mock_which: Mock, mock_run: Mock, mock_mkdir: Mock
+        self, mock_which: Mock, mock_subprocess: AsyncMock, mock_mkdir: Mock
     ) -> None:
         mock_which.return_value = "/usr/bin/tool"
-        mock_run.return_value.returncode = 0
+        process = AsyncMock()
+        process.wait.return_value = 0
+        process.returncode = 0
+        mock_subprocess.return_value = process
         shed = Shed(self.config_file)
-        health = shed._healthcheck()
+        health = asyncio.run(shed._healthcheck())
         self.assertEqual(health["ok"], True)
+        self.assertEqual(mock_subprocess.call_count, 2)
 
     @patch("pathlib.Path.mkdir")
-    @patch("ansible_shed.shed.run")
+    @patch("ansible_shed.shed.asyncio.create_subprocess_exec")
     @patch("ansible_shed.shed.shutil.which")
     def test_healthcheck_timeout(
-        self, mock_which: Mock, mock_run: Mock, mock_mkdir: Mock
+        self, mock_which: Mock, mock_subprocess: AsyncMock, mock_mkdir: Mock
     ) -> None:
         mock_which.return_value = "/usr/bin/tool"
-        mock_run.side_effect = TimeoutExpired(
-            cmd=["/usr/bin/tool", "--help"], timeout=5
-        )
+        process_1 = AsyncMock()
+        process_1.wait.side_effect = [asyncio.TimeoutError, 0]
+        process_1.kill = Mock()
+        process_2 = AsyncMock()
+        process_2.wait.side_effect = [asyncio.TimeoutError, 0]
+        process_2.kill = Mock()
+        mock_subprocess.side_effect = [process_1, process_2]
         shed = Shed(self.config_file)
-        health = shed._healthcheck()
+        health = asyncio.run(shed._healthcheck())
         self.assertEqual(health["ok"], False)
         checks = cast(Mapping[str, object], health["checks"])
         ansible_check = cast(Mapping[str, object], checks["ansible-playbook"])
