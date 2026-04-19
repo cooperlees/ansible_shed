@@ -8,7 +8,7 @@ from collections import defaultdict
 from collections.abc import Mapping
 from configparser import ConfigParser
 from datetime import datetime, timezone
-from json import JSONDecodeError, dumps, loads
+from json import dumps, JSONDecodeError, loads
 from pathlib import Path
 from random import randint
 from subprocess import DEVNULL, PIPE, Popen, run
@@ -16,8 +16,8 @@ from time import time
 
 import aiohttp
 import aiohttp.web
-from aioprometheus import render
 from aioprometheus.collectors import Gauge, Registry
+from aioprometheus.renderer import render
 from git.repo.base import Repo
 
 LOG = logging.getLogger(__name__)
@@ -86,9 +86,7 @@ class Shed:
             return int(timestamp_str)
         try:
             return int(
-                datetime.fromisoformat(
-                    timestamp_str.replace("Z", "+00:00")
-                ).timestamp()
+                datetime.fromisoformat(timestamp_str.replace("Z", "+00:00")).timestamp()
             )
         except ValueError:
             return None
@@ -157,8 +155,7 @@ class Shed:
             return aiohttp.web.json_response(
                 {
                     "error": (
-                        "invalid timestamp format, use UNIX epoch seconds "
-                        "or ISO8601"
+                        "invalid timestamp format, use UNIX epoch seconds " "or ISO8601"
                     )
                 },
                 status=400,
@@ -499,7 +496,9 @@ class Shed:
         bind_addr = self.config[SHED_CONFIG_SECTION].get("prometheus_bind_addr", "::")
         site = aiohttp.web.TCPSite(runner, bind_addr, self.stats_port)
         await site.start()
-        LOG.info(f"Serving prometheus metrics on: http://{bind_addr}:{self.stats_port}/metrics")
+        LOG.info(
+            f"Serving prometheus metrics on: http://{bind_addr}:{self.stats_port}/metrics"
+        )
         if not self.api_token:
             LOG.warning(
                 "api_token is not configured; authenticated API endpoints are unavailable"
@@ -539,7 +538,9 @@ class Shed:
                         self.paused_until_epoch, tz=timezone.utc
                     ).isoformat()
                     LOG.info(f"Paused until {pause_until}, skipping this runtime")
-                force_run_once = await self._wait_for_force_run(self.run_interval_seconds)
+                force_run_once = await self._wait_for_force_run(
+                    self.run_interval_seconds
+                )
                 if force_run_once:
                     LOG.info("Force run requested while paused; running once")
                 continue

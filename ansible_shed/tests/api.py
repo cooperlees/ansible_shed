@@ -17,8 +17,7 @@ class APITests(unittest.TestCase):
         self.repo_path.mkdir(parents=True)
         (self.repo_path / "site.yaml").write_text("---")
         self.config_file = self.test_path / "test_config.ini"
-        self.config_file.write_text(
-            f"""[ansible_shed]
+        self.config_file.write_text(f"""[ansible_shed]
 interval=60
 port=12345
 log_dir={self.test_path / "logs"}
@@ -29,8 +28,7 @@ ansible_playbook_binary=/usr/bin/ansible-playbook
 ansible_hosts_inventory=hosts
 ansible_playbook_init=site.yaml
 api_token=test-token
-"""
-        )
+""")
 
     def tearDown(self) -> None:
         self.test_dir.cleanup()
@@ -45,13 +43,17 @@ api_token=test-token
     def test_parse_timestamp(self, mock_mkdir: Mock) -> None:
         shed = Shed(self.config_file)
         self.assertEqual(shed._parse_timestamp_to_epoch("12345"), 12345)
-        self.assertEqual(shed._parse_timestamp_to_epoch("2026-03-11T01:45:55Z"), 1773193555)
+        self.assertEqual(
+            shed._parse_timestamp_to_epoch("2026-03-11T01:45:55Z"), 1773193555
+        )
         self.assertIsNone(shed._parse_timestamp_to_epoch("bad"))
 
     @patch("pathlib.Path.mkdir")
     @patch("ansible_shed.shed.run")
     @patch("ansible_shed.shed.shutil.which")
-    def test_healthcheck(self, mock_which: Mock, mock_run: Mock, mock_mkdir: Mock) -> None:
+    def test_healthcheck(
+        self, mock_which: Mock, mock_run: Mock, mock_mkdir: Mock
+    ) -> None:
         mock_which.return_value = "/usr/bin/tool"
         mock_run.return_value.returncode = 0
         shed = Shed(self.config_file)
