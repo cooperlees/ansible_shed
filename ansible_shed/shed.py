@@ -99,12 +99,14 @@ class Shed:
         if binary_dir == Path(".") or not binary_dir.exists():
             return
         current_path = os.environ.get("PATH", "")
-        path_entries = current_path.split(":") if current_path else []
+        path_entries = current_path.split(os.pathsep) if current_path else []
         binary_dir_str = str(binary_dir)
         if binary_dir_str in path_entries:
             return
         os.environ["PATH"] = (
-            f"{binary_dir_str}:{current_path}" if current_path else binary_dir_str
+            f"{binary_dir_str}{os.pathsep}{current_path}"
+            if current_path
+            else binary_dir_str
         )
         LOG.info(f"Prepended ansible binary path to PATH: {binary_dir}")
 

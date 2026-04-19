@@ -24,6 +24,7 @@ class APITests(unittest.TestCase):
         self.repo_path.mkdir(parents=True)
         (self.repo_path / "site.yaml").write_text("---")
         (self.bin_path / "ansible-playbook").write_text("#!/bin/sh\nexit 0\n")
+        (self.bin_path / "ansible-playbook").chmod(0o755)
         self.config_file = self.test_path / "test_config.ini"
         self.config_file.write_text(f"""[ansible_shed]
 interval=60
@@ -95,7 +96,9 @@ api_token=test-token
     def test_add_ansible_binary_path_to_path(self, mock_mkdir: Mock) -> None:
         os.environ["PATH"] = "/usr/bin"
         shed = Shed(self.config_file)
-        self.assertTrue(os.environ["PATH"].startswith(f"{self.bin_path}:/usr/bin"))
+        self.assertTrue(
+            os.environ["PATH"].startswith(f"{self.bin_path}{os.pathsep}/usr/bin")
+        )
         shed.reload_config_vars()
         self.assertEqual(os.environ["PATH"].count(str(self.bin_path)), 1)
 
