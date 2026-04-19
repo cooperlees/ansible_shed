@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import re
+import secrets
 import shutil
 from collections import defaultdict
 from collections.abc import Mapping
@@ -22,6 +23,7 @@ from git.repo.base import Repo
 
 LOG = logging.getLogger(__name__)
 SHED_CONFIG_SECTION = "ansible_shed"
+DEFAULT_API_TOKEN_PLACEHOLDER = "change-me-random-token"
 
 
 def _load_shed_config(config_path: Path) -> ConfigParser:
@@ -70,12 +72,19 @@ class Shed:
         self.version_check_state_enabled = self.config[SHED_CONFIG_SECTION].getboolean(
             "version_check_state_enabled", fallback=False
         )
-        self.api_token = self.config[SHED_CONFIG_SECTION].get("api_token")
+        configured_api_token = self.config[SHED_CONFIG_SECTION].get("api_token")
+        if configured_api_token == DEFAULT_API_TOKEN_PLACEHOLDER:
+            self.api_token = None
+            return
+        self.api_token = configured_api_token
 
     def _has_valid_api_token(self, headers: Mapping[str, str]) -> bool:
         if not self.api_token:
             return False
-        return headers.get("X-API-Token") == self.api_token
+        request_token = headers.get("X-API-Token")
+        if request_token is None:
+            return False
+        return secrets.compare_digest(request_token, self.api_token)
 
     @staticmethod
     def _parse_timestamp_to_epoch(timestamp_raw: str) -> int | None:
@@ -499,7 +508,8 @@ class Shed:
         )
         if not self.api_token:
             LOG.warning(
-                "api_token is not configured; authenticated API endpoints are unavailable"
+                "api_token is not configured or uses the default placeholder; "
+                "authenticated API endpoints are unavailable"
             )
         await self._update_prom_stats()
         await runner.cleanup()
