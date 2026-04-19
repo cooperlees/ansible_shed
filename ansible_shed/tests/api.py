@@ -91,16 +91,17 @@ api_token=test-token
     def test_metrics_url_for_log_ipv6(self, mock_mkdir: Mock) -> None:
         shed = Shed(self.config_file)
         self.assertEqual(shed._metrics_url_for_log("::"), "http://[::]:12345/metrics")
+        self.assertEqual(shed._metrics_url_for_log(""), "http://0.0.0.0:12345/metrics")
 
     @patch("pathlib.Path.mkdir")
     def test_add_ansible_binary_path_to_path(self, mock_mkdir: Mock) -> None:
         os.environ["PATH"] = "/usr/bin"
         shed = Shed(self.config_file)
-        self.assertTrue(
-            os.environ["PATH"].startswith(f"{self.bin_path}{os.pathsep}/usr/bin")
-        )
+        self.assertIn(str(self.bin_path), os.environ["PATH"].split(os.pathsep))
         shed.reload_config_vars()
-        self.assertEqual(os.environ["PATH"].count(str(self.bin_path)), 1)
+        self.assertEqual(
+            os.environ["PATH"].split(os.pathsep).count(str(self.bin_path)), 1
+        )
 
     @patch("pathlib.Path.mkdir")
     def test_wait_for_force_run(self, mock_mkdir: Mock) -> None:

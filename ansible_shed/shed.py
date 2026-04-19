@@ -138,7 +138,7 @@ class Shed:
         return int(time()) < self.paused_until_epoch
 
     def _metrics_url_for_log(self, bind_addr: str) -> str:
-        host = bind_addr or "::"
+        host = bind_addr or "0.0.0.0"
         try:
             ip = ipaddress.ip_address(host)
             if ip.version == 6:
