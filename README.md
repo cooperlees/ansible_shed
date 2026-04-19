@@ -80,7 +80,7 @@ ansible_unreachable{hostname="home2.cooperlees.com"} 0
   - All [aioprometheus](https://github.com/claws/aioprometheus) powered
 - Additional REST APIs (token-authenticated using `X-API-Token` header):
   - `POST /pause` with `timestamp` in JSON body (UNIX epoch or ISO8601) or query
-  - `POST /force-run` (also accepts `POST /force_run`)
+  - `POST /force-run`
   - `GET /healthz` validates `ansible-playbook --help` and `git --help`
 
 ## Grafana Dashboard

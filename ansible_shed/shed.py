@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
 import asyncio
+import ipaddress
 import logging
+import os
 import re
 import secrets
 import shutil
@@ -12,7 +14,7 @@ from datetime import datetime, timezone
 from json import dumps, JSONDecodeError, loads
 from pathlib import Path
 from random import randint
-from subprocess import DEVNULL, PIPE, Popen, run
+from subprocess import DEVNULL, PIPE, Popen, run, TimeoutExpired
 from time import time
 
 import aiohttp
@@ -73,6 +75,7 @@ class Shed:
         self.version_check_state_enabled = self.config[SHED_CONFIG_SECTION].getboolean(
             "version_check_state_enabled", fallback=False
         )
+        self._add_ansible_binary_dir_to_path()
         configured_api_token = self.config[SHED_CONFIG_SECTION].get("api_token")
         if configured_api_token == DEFAULT_API_TOKEN_PLACEHOLDER:
             self.api_token = None
@@ -85,6 +88,25 @@ class Shed:
             return
         self.api_token = configured_api_token
         self._default_api_token_warning_logged = False
+
+    def _add_ansible_binary_dir_to_path(self) -> None:
+        ansible_playbook_binary = self.config[SHED_CONFIG_SECTION].get(
+            "ansible_playbook_binary"
+        )
+        if not ansible_playbook_binary:
+            return
+        binary_dir = Path(ansible_playbook_binary).parent
+        if binary_dir == Path(".") or not binary_dir.exists():
+            return
+        current_path = os.environ.get("PATH", "")
+        path_entries = current_path.split(":") if current_path else []
+        binary_dir_str = str(binary_dir)
+        if binary_dir_str in path_entries:
+            return
+        os.environ["PATH"] = (
+            f"{binary_dir_str}:{current_path}" if current_path else binary_dir_str
+        )
+        LOG.info(f"Prepended ansible binary path to PATH: {binary_dir}")
 
     def _has_valid_api_token(self, headers: Mapping[str, str]) -> bool:
         if not self.api_token:
@@ -113,6 +135,16 @@ class Shed:
             return False
         return int(time()) < self.paused_until_epoch
 
+    def _metrics_url_for_log(self, bind_addr: str) -> str:
+        host = bind_addr or "::"
+        try:
+            ip = ipaddress.ip_address(host)
+            if ip.version == 6:
+                host = f"[{host}]"
+        except ValueError:
+            pass
+        return f"http://{host}:{self.stats_port}/metrics"
+
     def _healthcheck(self) -> dict[str, object]:
         checks: dict[str, dict[str, object]] = {}
         for binary_name in ("ansible-playbook", "git"):
@@ -120,12 +152,20 @@ class Shed:
             if not binary_path:
                 checks[binary_name] = {"ok": False, "reason": "not found"}
                 continue
-            returncode = run(
-                [binary_path, "--help"],
-                stdout=DEVNULL,
-                stderr=DEVNULL,
-                check=False,
-            ).returncode
+            try:
+                returncode = run(
+                    [binary_path, "--help"],
+                    stdout=DEVNULL,
+                    stderr=DEVNULL,
+                    check=False,
+                    timeout=5,
+                ).returncode
+            except TimeoutExpired:
+                checks[binary_name] = {"ok": False, "reason": "timeout"}
+                continue
+            except OSError as err:
+                checks[binary_name] = {"ok": False, "reason": str(err)}
+                continue
             checks[binary_name] = {"ok": returncode == 0, "returncode": returncode}
         return {"ok": all(c["ok"] for c in checks.values()), "checks": checks}
 
@@ -504,7 +544,6 @@ class Shed:
         app.router.add_route("GET", "/metrics", self._handle_metrics)
         app.router.add_route("POST", "/pause", self._handle_pause)
         app.router.add_route("POST", "/force-run", self._handle_force_run)
-        app.router.add_route("POST", "/force_run", self._handle_force_run)
         app.router.add_route("GET", "/healthz", self._handle_healthz)
         runner = aiohttp.web.AppRunner(app, shutdown_timeout=2.0)
         await runner.setup()
@@ -512,15 +551,17 @@ class Shed:
         site = aiohttp.web.TCPSite(runner, bind_addr, self.stats_port)
         await site.start()
         LOG.info(
-            f"Serving prometheus metrics on: http://{bind_addr}:{self.stats_port}/metrics"
+            f"Serving prometheus metrics on: {self._metrics_url_for_log(bind_addr)}"
         )
         if not self.api_token:
             LOG.warning(
                 "api_token is not configured or uses the default placeholder; "
                 "authenticated API endpoints are unavailable"
             )
-        await self._update_prom_stats()
-        await runner.cleanup()
+        try:
+            await self._update_prom_stats()
+        finally:
+            await runner.cleanup()
 
     # TODO: Make coroutine cleanly exit on shutdown
     async def ansible_runner(self) -> None:
@@ -544,9 +585,7 @@ class Shed:
             )
             self.reload_config_vars()
 
-            if self.force_run_requested.is_set():
-                self.force_run_requested.clear()
-                force_run_once = True
+            force_run_once = await self._wait_for_force_run(0)
 
             if self._is_paused() and not force_run_once:
                 if self.paused_until_epoch is not None:
