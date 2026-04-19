@@ -93,6 +93,8 @@ api_token=test-token
         checks = cast(Mapping[str, object], health["checks"])
         ansible_check = cast(Mapping[str, object], checks["ansible-playbook"])
         self.assertEqual(ansible_check["reason"], "timeout")
+        process_1.kill.assert_called_once()
+        process_2.kill.assert_called_once()
 
     @patch("pathlib.Path.mkdir")
     def test_metrics_url_for_log_ipv6(self, mock_mkdir: Mock) -> None:
