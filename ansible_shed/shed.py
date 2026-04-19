@@ -39,6 +39,7 @@ class Shed:
     def __init__(self, config_path: Path) -> None:
         self.config = _load_shed_config(config_path)
         self.config_path = config_path
+        self._default_api_token_warning_logged = False
         self.reload_config_vars()
 
         self.prom_stats: dict[str, int] = defaultdict(int)
@@ -75,8 +76,15 @@ class Shed:
         configured_api_token = self.config[SHED_CONFIG_SECTION].get("api_token")
         if configured_api_token == DEFAULT_API_TOKEN_PLACEHOLDER:
             self.api_token = None
+            if not self._default_api_token_warning_logged:
+                LOG.warning(
+                    "api_token is using the default placeholder value and is ignored; "
+                    "set a random unique token to enable authenticated APIs"
+                )
+                self._default_api_token_warning_logged = True
             return
         self.api_token = configured_api_token
+        self._default_api_token_warning_logged = False
 
     def _has_valid_api_token(self, headers: Mapping[str, str]) -> bool:
         if not self.api_token:
