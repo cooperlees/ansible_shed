@@ -34,6 +34,11 @@ def _normalize_host(host: str) -> str:
 def load_api_config(
     config_path: Path, host: str = "::1", scheme: str = "http"
 ) -> ApiConfig:
+    """Load API connection settings from ansible_shed config.
+
+    The default host is IPv6 loopback (::1) to match the service's default bind
+    behavior. Override host/scheme when targeting a different listener.
+    """
     cp = ConfigParser()
     with config_path.open("r") as cpfp:
         cp.read_file(cpfp)

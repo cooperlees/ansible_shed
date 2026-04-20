@@ -58,8 +58,12 @@ api_token=change-me-random-token
         self.assertIn("example: in 30m", result.output)
 
     def test_normalize_pause_timestamp_relative_time(self) -> None:
+        expected_seconds = 30 * 60
+        tolerance_seconds = 5
         before = int(time())
         normalized = int(_normalize_pause_timestamp("in 30m"))
         after = int(time())
-        self.assertGreaterEqual(normalized, before + 1795)
-        self.assertLessEqual(normalized, after + 1805)
+        self.assertGreaterEqual(
+            normalized, before + expected_seconds - tolerance_seconds
+        )
+        self.assertLessEqual(normalized, after + expected_seconds + tolerance_seconds)
