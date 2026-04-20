@@ -6,6 +6,8 @@ from typing import Any
 
 import aiohttp
 
+DEFAULT_TIMEOUT_SECONDS = 10
+
 
 class AnsibleShedApiClient:
     def __init__(
@@ -13,7 +15,7 @@ class AnsibleShedApiClient:
         base_url: str,
         api_token: str,
         session: aiohttp.ClientSession | None = None,
-        timeout_seconds: int = 10,
+        timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_token = api_token

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from json import dumps
 from pathlib import Path
 
@@ -17,35 +18,27 @@ def _emit_json(payload: dict[str, object]) -> None:
 async def _run_command(
     config: Path,
     base_url: str | None,
-    action: str,
-    timestamp: str | None = None,
-) -> int:
+    operation: Callable[[AnsibleShedApiClient], Awaitable[dict[str, object]]],
+) -> dict[str, object]:
     try:
-        loaded = (
-            load_api_config(config) if base_url is None else load_api_config(config)
-        )
-    except ValueError as err:
+        loaded = load_api_config(config)
+    except (OSError, ValueError) as err:
         raise click.ClickException(str(err)) from err
 
     resolved_base_url = base_url or loaded.base_url
     async with AnsibleShedApiClient(
         base_url=resolved_base_url, api_token=loaded.api_token
     ) as client:
-        if action == "pause":
-            if timestamp is None:
-                raise click.ClickException("timestamp is required for pause")
-            payload = await client.pause(timestamp=timestamp)
-            _emit_json(payload)
-            return 0
-        if action == "force-run":
-            payload = await client.force_run()
-            _emit_json(payload)
-            return 0
-        if action == "healthz":
-            payload = await client.healthz()
-            _emit_json(payload)
-            return 0 if bool(payload.get("ok")) else 1
-        raise click.ClickException(f"unknown action: {action}")
+        return await operation(client)
+
+
+def _get_context_options(ctx: click.core.Context) -> tuple[Path, str | None]:
+    obj = ctx.obj
+    if not isinstance(obj, dict):
+        raise click.ClickException("CLI context is invalid")
+    config = obj.get("config", Path("/etc/ansible_shed.ini"))
+    base_url = obj.get("base_url")
+    return config, base_url
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
@@ -76,39 +69,44 @@ def main(ctx: click.core.Context, config: Path, base_url: str | None) -> None:
 )
 @click.pass_context
 def pause(ctx: click.core.Context, timestamp: str) -> None:
-    obj = ctx.obj if ctx.obj is not None else {}
-    config = obj.get("config", Path("/etc/ansible_shed.ini"))
-    base_url = obj.get("base_url")
-    exit_code = asyncio.run(
+    config, base_url = _get_context_options(ctx)
+    payload = asyncio.run(
         _run_command(
-            config=config, base_url=base_url, action="pause", timestamp=timestamp
+            config=config,
+            base_url=base_url,
+            operation=lambda client: client.pause(timestamp=timestamp),
         )
     )
-    ctx.exit(exit_code)
+    _emit_json(payload)
 
 
 @main.command("force-run")
 @click.pass_context
 def force_run(ctx: click.core.Context) -> None:
-    obj = ctx.obj if ctx.obj is not None else {}
-    config = obj.get("config", Path("/etc/ansible_shed.ini"))
-    base_url = obj.get("base_url")
-    exit_code = asyncio.run(
-        _run_command(config=config, base_url=base_url, action="force-run")
+    config, base_url = _get_context_options(ctx)
+    payload = asyncio.run(
+        _run_command(
+            config=config,
+            base_url=base_url,
+            operation=lambda client: client.force_run(),
+        )
     )
-    ctx.exit(exit_code)
+    _emit_json(payload)
 
 
 @main.command("healthz")
 @click.pass_context
 def healthz(ctx: click.core.Context) -> None:
-    obj = ctx.obj if ctx.obj is not None else {}
-    config = obj.get("config", Path("/etc/ansible_shed.ini"))
-    base_url = obj.get("base_url")
-    exit_code = asyncio.run(
-        _run_command(config=config, base_url=base_url, action="healthz")
+    config, base_url = _get_context_options(ctx)
+    payload = asyncio.run(
+        _run_command(
+            config=config,
+            base_url=base_url,
+            operation=lambda client: client.healthz(),
+        )
     )
-    ctx.exit(exit_code)
+    _emit_json(payload)
+    ctx.exit(0 if bool(payload.get("ok")) else 1)
 
 
 if __name__ == "__main__":  # pragma: no cover

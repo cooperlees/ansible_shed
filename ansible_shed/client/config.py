@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 
+import ipaddress
 from configparser import ConfigParser
 from dataclasses import dataclass
 from pathlib import Path
 
 from ansible_shed.shed import DEFAULT_API_TOKEN_PLACEHOLDER, SHED_CONFIG_SECTION
+
+DEFAULT_API_PORT = 12345
 
 
 @dataclass(frozen=True)
@@ -15,7 +18,13 @@ class ApiConfig:
 
 def _normalize_host(host: str) -> str:
     normalized_host = host.strip()
-    if ":" in normalized_host and not normalized_host.startswith("["):
+    if normalized_host.startswith("[") and normalized_host.endswith("]"):
+        return normalized_host
+    try:
+        ip = ipaddress.ip_address(normalized_host)
+    except ValueError:
+        return normalized_host
+    if ip.version == 6:
         return f"[{normalized_host}]"
     return normalized_host
 
@@ -37,7 +46,7 @@ def load_api_config(
             "api_token is not configured; set a random unique token in config"
         )
 
-    port = section.getint("port", fallback=12345)
+    port = section.getint("port", fallback=DEFAULT_API_PORT)
     normalized_host = _normalize_host(host)
     return ApiConfig(
         base_url=f"{scheme}://{normalized_host}:{port}", api_token=api_token

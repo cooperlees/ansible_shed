@@ -29,7 +29,7 @@ api_token=test-token
         self.assertEqual(loaded.base_url, "http://127.0.0.1:12345")
         self.assertEqual(loaded.api_token, "test-token")
 
-    def test_load_api_config_rejects_default_token(self) -> None:
+    def test_load_api_config_raises_on_default_token(self) -> None:
         self.config_file.write_text("""[ansible_shed]
 port=12345
 api_token=change-me-random-token
@@ -41,7 +41,7 @@ api_token=change-me-random-token
     def test_cli_force_run_invokes_async_runner(
         self, mock_run_command: AsyncMock
     ) -> None:
-        mock_run_command.return_value = 0
+        mock_run_command.return_value = {"status": "scheduled"}
         runner = CliRunner()
         result = runner.invoke(
             cli_main,
