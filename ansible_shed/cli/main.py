@@ -32,7 +32,7 @@ def _normalize_pause_timestamp(timestamp: str) -> str:
         "h": timedelta(hours=amount),
         "d": timedelta(days=amount),
     }
-    pause_until = datetime.now(tz=UTC) + unit_to_delta[unit]
+    pause_until = datetime.now(UTC) + unit_to_delta[unit]
     return str(int(pause_until.timestamp()))
 
 
