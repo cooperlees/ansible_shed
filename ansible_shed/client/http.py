@@ -41,16 +41,20 @@ class AnsibleShedApiClient:
         return await self._request_json("POST", "/force-run")
 
     async def healthz(self) -> dict[str, object]:
-        return await self._request_json("GET", "/healthz")
+        return await self._request_json("GET", "/healthz", expected_statuses={200, 503})
 
     async def _request_json(
         self,
         method: str,
         path: str,
         json: Mapping[str, object] | None = None,
+        expected_statuses: set[int] | None = None,
     ) -> dict[str, object]:
         headers = {"X-API-Token": self.api_token}
         url = f"{self.base_url}{path}"
+        accepted_statuses = (
+            expected_statuses if expected_statuses is not None else set(range(200, 300))
+        )
         async with self._session.request(
             method, url, headers=headers, json=json
         ) as response:
@@ -62,7 +66,7 @@ class AnsibleShedApiClient:
                     f"Unexpected non-JSON response ({response.status}): {body}"
                 ) from err
 
-            if response.status >= 400:
+            if response.status not in accepted_statuses:
                 raise RuntimeError(f"HTTP {response.status}: {payload}")
 
             return payload

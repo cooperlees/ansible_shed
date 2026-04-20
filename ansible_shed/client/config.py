@@ -5,9 +5,11 @@ from configparser import ConfigParser
 from dataclasses import dataclass
 from pathlib import Path
 
-from ansible_shed.shed import DEFAULT_API_TOKEN_PLACEHOLDER, SHED_CONFIG_SECTION
-
-DEFAULT_API_PORT = 12345
+from ansible_shed.constants import (
+    DEFAULT_API_PORT,
+    DEFAULT_API_TOKEN_PLACEHOLDER,
+    SHED_CONFIG_SECTION,
+)
 
 
 @dataclass(frozen=True)
@@ -30,7 +32,7 @@ def _normalize_host(host: str) -> str:
 
 
 def load_api_config(
-    config_path: Path, host: str = "127.0.0.1", scheme: str = "http"
+    config_path: Path, host: str = "::1", scheme: str = "http"
 ) -> ApiConfig:
     cp = ConfigParser()
     with config_path.open("r") as cpfp:

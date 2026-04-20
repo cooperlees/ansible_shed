@@ -48,7 +48,7 @@ setup(
             "ansible-shed-cli = ansible_shed.cli.main:main",
         ]
     },
-    install_requires=["aioprometheus[aiohttp]", "click>=8.0", "GitPython"],
+    install_requires=["aiohttp", "aioprometheus[aiohttp]", "click>=8.0", "GitPython"],
     extras_require={
         # If you'd like the ansible toolset dependency installed
         "ansible": ["ansible"],

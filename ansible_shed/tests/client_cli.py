@@ -3,11 +3,12 @@
 import tempfile
 import unittest
 from pathlib import Path
+from time import time
 from unittest.mock import AsyncMock, patch
 
 from click.testing import CliRunner
 
-from ansible_shed.cli.main import main as cli_main
+from ansible_shed.cli.main import _normalize_pause_timestamp, main as cli_main
 from ansible_shed.client.config import load_api_config
 
 
@@ -26,7 +27,7 @@ api_token=test-token
 
     def test_load_api_config(self) -> None:
         loaded = load_api_config(self.config_file)
-        self.assertEqual(loaded.base_url, "http://127.0.0.1:12345")
+        self.assertEqual(loaded.base_url, "http://[::1]:12345")
         self.assertEqual(loaded.api_token, "test-token")
 
     def test_load_api_config_raises_on_default_token(self) -> None:
@@ -49,3 +50,16 @@ api_token=change-me-random-token
         )
         self.assertEqual(result.exit_code, 0)
         mock_run_command.assert_awaited_once()
+
+    def test_cli_pause_help_includes_human_friendly_example(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(cli_main, ["pause", "--help"])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("example: in 30m", result.output)
+
+    def test_normalize_pause_timestamp_relative_time(self) -> None:
+        before = int(time())
+        normalized = int(_normalize_pause_timestamp("in 30m"))
+        after = int(time())
+        self.assertGreaterEqual(normalized, before + 1795)
+        self.assertLessEqual(normalized, after + 1805)

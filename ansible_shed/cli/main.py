@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
 import asyncio
+import re
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timedelta, UTC
 from json import dumps
 from pathlib import Path
 
@@ -15,6 +17,25 @@ def _emit_json(payload: dict[str, object]) -> None:
     click.echo(dumps(payload, sort_keys=True, indent=2))
 
 
+_IN_TIME_RE = re.compile(r"^in\s+(\d+)\s*([smhd])$")
+
+
+def _normalize_pause_timestamp(timestamp: str) -> str:
+    match = _IN_TIME_RE.match(timestamp.strip().lower())
+    if not match:
+        return timestamp
+    amount = int(match.group(1))
+    unit = match.group(2)
+    unit_to_delta = {
+        "s": timedelta(seconds=amount),
+        "m": timedelta(minutes=amount),
+        "h": timedelta(hours=amount),
+        "d": timedelta(days=amount),
+    }
+    pause_until = datetime.now(tz=UTC) + unit_to_delta[unit]
+    return str(int(pause_until.timestamp()))
+
+
 async def _run_command(
     config: Path,
     base_url: str | None,
@@ -26,10 +47,17 @@ async def _run_command(
         raise click.ClickException(str(err)) from err
 
     resolved_base_url = base_url or loaded.base_url
-    async with AnsibleShedApiClient(
-        base_url=resolved_base_url, api_token=loaded.api_token
-    ) as client:
-        return await operation(client)
+    try:
+        async with AnsibleShedApiClient(
+            base_url=resolved_base_url, api_token=loaded.api_token
+        ) as client:
+            return await operation(client)
+    except click.ClickException:
+        raise
+    except RuntimeError as err:
+        raise click.ClickException(str(err)) from err
+    except Exception as err:
+        raise click.ClickException(str(err)) from err
 
 
 def _get_context_options(ctx: click.core.Context) -> tuple[Path, str | None]:
@@ -52,7 +80,7 @@ def _get_context_options(ctx: click.core.Context) -> tuple[Path, str | None]:
 @click.option(
     "--base-url",
     default=None,
-    help="Optional API base URL override (example: http://127.0.0.1:12345)",
+    help="Optional API base URL override (example: http://[::1]:12345)",
 )
 @click.pass_context
 def main(ctx: click.core.Context, config: Path, base_url: str | None) -> None:
@@ -65,16 +93,19 @@ def main(ctx: click.core.Context, config: Path, base_url: str | None) -> None:
 @click.option(
     "--timestamp",
     required=True,
-    help="UNIX epoch seconds or ISO8601 timestamp",
+    help=(
+        "UNIX epoch seconds, ISO8601 timestamp, or relative format (example: in 30m)"
+    ),
 )
 @click.pass_context
 def pause(ctx: click.core.Context, timestamp: str) -> None:
     config, base_url = _get_context_options(ctx)
+    normalized_timestamp = _normalize_pause_timestamp(timestamp)
     payload = asyncio.run(
         _run_command(
             config=config,
             base_url=base_url,
-            operation=lambda client: client.pause(timestamp=timestamp),
+            operation=lambda client: client.pause(timestamp=normalized_timestamp),
         )
     )
     _emit_json(payload)
