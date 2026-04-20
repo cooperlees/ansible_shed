@@ -119,6 +119,7 @@ Config Settings:
 - `port`: Statistics listening port + interval
 - `vault_pass_file`: (Optional) Path to Ansible vault password file. If set, this file will be copied to `.vault_pass` in the checked out repo and ansible-playbook will be run with `--vault-password-file` flag.
 - `api_token`: API token required in `X-API-Token` for `/pause`, `/force-run`, and `/healthz`
+- `ansible_playbook_binary`: Must point to an `ansible-playbook` binary inside a Python virtualenv (`<venv>/bin/ansible-playbook`); ansible_shed uses the sibling `<venv>/bin/activate` script path to activate that venv environment
 
 ## mypyc build/install
 

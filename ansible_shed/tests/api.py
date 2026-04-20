@@ -15,6 +15,7 @@ from ansible_shed.shed import Shed
 class APITests(unittest.TestCase):
     def setUp(self) -> None:
         self.original_path = os.environ.get("PATH", "")
+        self.original_virtual_env = os.environ.get("VIRTUAL_ENV")
         self.test_dir = tempfile.TemporaryDirectory()
         self.test_path = Path(self.test_dir.name)
         self.repo_path = self.test_path / "repo"
@@ -22,6 +23,7 @@ class APITests(unittest.TestCase):
         self.bin_path.mkdir(parents=True)
         self.repo_path.mkdir(parents=True)
         (self.repo_path / "site.yaml").write_text("---")
+        (self.bin_path / "activate").write_text("# venv activate script\n")
         (self.bin_path / "ansible-playbook").write_text("#!/bin/sh\nexit 0\n")
         (self.bin_path / "ansible-playbook").chmod(0o755)
         self.config_file = self.test_path / "test_config.ini"
@@ -40,6 +42,10 @@ api_token=test-token
 
     def tearDown(self) -> None:
         os.environ["PATH"] = self.original_path
+        if self.original_virtual_env is None:
+            os.environ.pop("VIRTUAL_ENV", None)
+        else:
+            os.environ["VIRTUAL_ENV"] = self.original_virtual_env
         self.test_dir.cleanup()
 
     @patch("pathlib.Path.mkdir")
@@ -107,6 +113,7 @@ api_token=test-token
         os.environ["PATH"] = "/usr/bin"
         shed = Shed(self.config_file)
         self.assertIn(str(self.bin_path), os.environ["PATH"].split(os.pathsep))
+        self.assertEqual(os.environ.get("VIRTUAL_ENV"), str(self.test_path))
         shed.reload_config_vars()
         self.assertEqual(
             os.environ["PATH"].split(os.pathsep).count(str(self.bin_path)), 1

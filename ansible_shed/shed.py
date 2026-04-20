@@ -16,6 +16,7 @@ from pathlib import Path
 from random import randint
 from subprocess import PIPE, Popen, run
 from time import time
+from typing import TypedDict
 
 import aiohttp
 import aiohttp.web
@@ -27,6 +28,12 @@ LOG = logging.getLogger(__name__)
 SHED_CONFIG_SECTION = "ansible_shed"
 DEFAULT_API_TOKEN_PLACEHOLDER = "change-me-random-token"
 HEALTHCHECK_TIMEOUT_SECONDS = 5
+
+
+class HealthcheckCommandResult(TypedDict, total=False):
+    ok: bool
+    reason: str
+    returncode: int
 
 
 def _load_shed_config(config_path: Path) -> ConfigParser:
@@ -76,7 +83,7 @@ class Shed:
         self.version_check_state_enabled = self.config[SHED_CONFIG_SECTION].getboolean(
             "version_check_state_enabled", fallback=False
         )
-        self._add_ansible_binary_dir_to_path()
+        self._activate_ansible_virtualenv()
         configured_api_token = self.config[SHED_CONFIG_SECTION].get("api_token")
         if configured_api_token == DEFAULT_API_TOKEN_PLACEHOLDER:
             self.api_token = None
@@ -90,7 +97,7 @@ class Shed:
         self.api_token = configured_api_token
         self._default_api_token_warning_logged = False
 
-    def _add_ansible_binary_dir_to_path(self) -> None:
+    def _activate_ansible_virtualenv(self) -> None:
         ansible_playbook_binary = self.config[SHED_CONFIG_SECTION].get(
             "ansible_playbook_binary"
         )
@@ -99,17 +106,25 @@ class Shed:
         binary_dir = Path(ansible_playbook_binary).parent
         if binary_dir == Path(".") or not binary_dir.exists():
             return
+        activate_script = binary_dir / "activate"
+        if not activate_script.exists():
+            LOG.warning(
+                "ansible_playbook_binary should point to a Python virtualenv binary "
+                f"(missing activate script: {activate_script})"
+            )
+            return
+        virtual_env = str(binary_dir.parent)
+        os.environ["VIRTUAL_ENV"] = virtual_env
         current_path = os.environ.get("PATH", "")
         path_entries = current_path.split(os.pathsep) if current_path else []
         binary_dir_str = str(binary_dir)
-        if binary_dir_str in path_entries:
-            return
-        os.environ["PATH"] = (
-            f"{binary_dir_str}{os.pathsep}{current_path}"
-            if current_path
-            else binary_dir_str
-        )
-        LOG.info(f"Prepended ansible binary path to PATH: {binary_dir}")
+        if binary_dir_str not in path_entries:
+            os.environ["PATH"] = (
+                f"{binary_dir_str}{os.pathsep}{current_path}"
+                if current_path
+                else binary_dir_str
+            )
+        LOG.info(f"Activated ansible virtualenv from: {activate_script}")
 
     def _has_valid_api_token(self, headers: Mapping[str, str]) -> bool:
         if not self.api_token:
@@ -150,7 +165,7 @@ class Shed:
 
     async def _healthcheck_command(
         self, binary_name: str
-    ) -> tuple[str, dict[str, object]]:
+    ) -> tuple[str, HealthcheckCommandResult]:
         binary_path = shutil.which(binary_name)
         if not binary_path:
             return (binary_name, {"ok": False, "reason": "not found"})
@@ -175,9 +190,10 @@ class Shed:
             except ProcessLookupError:
                 pass
             return (binary_name, {"ok": False, "reason": "timeout"})
+        returncode = process.returncode if process.returncode is not None else -1
         return (
             binary_name,
-            {"ok": process.returncode == 0, "returncode": process.returncode},
+            {"ok": returncode == 0, "returncode": returncode},
         )
 
     async def _healthcheck(self) -> dict[str, object]:
