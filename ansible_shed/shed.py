@@ -1,24 +1,39 @@
 #!/usr/bin/env python3
 
 import asyncio
+import ipaddress
 import logging
+import os
 import re
+import secrets
 import shutil
 from collections import defaultdict
+from collections.abc import Mapping
 from configparser import ConfigParser
 from datetime import datetime, timezone
-from json import dumps, loads
+from json import dumps, JSONDecodeError, loads
 from pathlib import Path
 from random import randint
 from subprocess import PIPE, Popen, run
 from time import time
+from typing import TypedDict
 
+import aiohttp
+import aiohttp.web
 from aioprometheus.collectors import Gauge, Registry
-from aioprometheus.service import Service
+from aioprometheus.renderer import render
 from git.repo.base import Repo
 
 LOG = logging.getLogger(__name__)
 SHED_CONFIG_SECTION = "ansible_shed"
+DEFAULT_API_TOKEN_PLACEHOLDER = "change-me-random-token"
+HEALTHCHECK_TIMEOUT_SECONDS = 5
+
+
+class HealthcheckCommandResult(TypedDict, total=False):
+    ok: bool
+    reason: str
+    returncode: int
 
 
 def _load_shed_config(config_path: Path) -> ConfigParser:
@@ -34,11 +49,14 @@ class Shed:
     def __init__(self, config_path: Path) -> None:
         self.config = _load_shed_config(config_path)
         self.config_path = config_path
+        self._default_api_token_warning_logged = False
         self.reload_config_vars()
 
         self.prom_stats: dict[str, int] = defaultdict(int)
         self.prom_stats_update = asyncio.Event()
+        self.force_run_requested = asyncio.Event()
         self.version_check_packages: list[dict[str, str]] = []
+        self.paused_until_epoch: int | None = None
 
         # Set and create log directory
         log_dir = self.config[SHED_CONFIG_SECTION].get("log_dir")
@@ -65,6 +83,201 @@ class Shed:
         self.version_check_state_enabled = self.config[SHED_CONFIG_SECTION].getboolean(
             "version_check_state_enabled", fallback=False
         )
+        self._activate_ansible_virtualenv()
+        configured_api_token = self.config[SHED_CONFIG_SECTION].get("api_token")
+        if configured_api_token == DEFAULT_API_TOKEN_PLACEHOLDER:
+            self.api_token = None
+            if not self._default_api_token_warning_logged:
+                LOG.warning(
+                    "api_token is using the default placeholder value and is ignored; "
+                    "set a random unique token to enable authenticated APIs"
+                )
+                self._default_api_token_warning_logged = True
+            return
+        self.api_token = configured_api_token
+        self._default_api_token_warning_logged = False
+
+    def _activate_ansible_virtualenv(self) -> None:
+        ansible_playbook_binary = self.config[SHED_CONFIG_SECTION].get(
+            "ansible_playbook_binary"
+        )
+        if not ansible_playbook_binary:
+            return
+        binary_dir = Path(ansible_playbook_binary).parent
+        if binary_dir == Path(".") or not binary_dir.exists():
+            return
+        activate_script = binary_dir / "activate"
+        if not activate_script.exists():
+            LOG.warning(
+                "ansible_playbook_binary should point to a Python virtualenv binary "
+                f"(missing activate script: {activate_script})"
+            )
+            return
+        virtual_env = str(binary_dir.parent)
+        os.environ["VIRTUAL_ENV"] = virtual_env
+        current_path = os.environ.get("PATH", "")
+        path_entries = current_path.split(os.pathsep) if current_path else []
+        binary_dir_str = str(binary_dir)
+        if binary_dir_str not in path_entries:
+            os.environ["PATH"] = (
+                f"{binary_dir_str}{os.pathsep}{current_path}"
+                if current_path
+                else binary_dir_str
+            )
+        LOG.info(f"Activated ansible virtualenv from: {activate_script}")
+
+    def _has_valid_api_token(self, headers: Mapping[str, str]) -> bool:
+        if not self.api_token:
+            return False
+        request_token = headers.get("X-API-Token")
+        if request_token is None:
+            return False
+        return secrets.compare_digest(request_token, self.api_token)
+
+    @staticmethod
+    def _parse_timestamp_to_epoch(timestamp_raw: str) -> int | None:
+        timestamp_str = timestamp_raw.strip()
+        if not timestamp_str:
+            return None
+        if timestamp_str.isdigit():
+            return int(timestamp_str)
+        try:
+            return int(
+                datetime.fromisoformat(timestamp_str.replace("Z", "+00:00")).timestamp()
+            )
+        except ValueError:
+            return None
+
+    def _is_paused(self) -> bool:
+        if self.paused_until_epoch is None:
+            return False
+        return int(time()) < self.paused_until_epoch
+
+    def _metrics_url_for_log(self, bind_addr: str) -> str:
+        host = bind_addr or "0.0.0.0"
+        try:
+            ip = ipaddress.ip_address(host)
+            if ip.version == 6:
+                host = f"[{host}]"
+        except ValueError:
+            pass
+        return f"http://{host}:{self.stats_port}/metrics"
+
+    async def _healthcheck_command(
+        self, binary_name: str
+    ) -> tuple[str, HealthcheckCommandResult]:
+        binary_path = shutil.which(binary_name)
+        if not binary_path:
+            return (binary_name, {"ok": False, "reason": "not found"})
+        try:
+            process = await asyncio.create_subprocess_exec(
+                binary_path,
+                "--help",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+        except OSError as err:
+            return (binary_name, {"ok": False, "reason": str(err)})
+        try:
+            await asyncio.wait_for(
+                process.wait(),
+                timeout=HEALTHCHECK_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            process.kill()
+            try:
+                await process.wait()
+            except ProcessLookupError:
+                pass
+            return (binary_name, {"ok": False, "reason": "timeout"})
+        returncode = process.returncode if process.returncode is not None else -1
+        return (
+            binary_name,
+            {"ok": returncode == 0, "returncode": returncode},
+        )
+
+    async def _healthcheck(self) -> dict[str, object]:
+        checks = {
+            binary_name: check
+            for binary_name, check in await asyncio.gather(
+                self._healthcheck_command("ansible-playbook"),
+                self._healthcheck_command("git"),
+            )
+        }
+        return {"ok": all(c["ok"] for c in checks.values()), "checks": checks}
+
+    async def _wait_for_force_run(self, timeout_seconds: int) -> bool:
+        if timeout_seconds <= 0:
+            if not self.force_run_requested.is_set():
+                return False
+            self.force_run_requested.clear()
+            return True
+        try:
+            await asyncio.wait_for(self.force_run_requested.wait(), timeout_seconds)
+        except asyncio.TimeoutError:
+            return False
+        self.force_run_requested.clear()
+        return True
+
+    async def _handle_metrics(
+        self, request: aiohttp.web.Request
+    ) -> aiohttp.web.Response:
+        content, http_headers = render(
+            self.prom_registry, request.headers.getall("Accept", [])
+        )
+        return aiohttp.web.Response(body=content, headers=http_headers)
+
+    async def _handle_pause(self, request: aiohttp.web.Request) -> aiohttp.web.Response:
+        if not self._has_valid_api_token(request.headers):
+            return aiohttp.web.json_response({"error": "unauthorized"}, status=401)
+        try:
+            body = await request.json()
+        except (JSONDecodeError, aiohttp.ContentTypeError):
+            body = {}
+
+        timestamp_raw = body.get("timestamp") if isinstance(body, dict) else None
+        if timestamp_raw is None:
+            timestamp_raw = request.query.get("timestamp")
+        if timestamp_raw is None:
+            return aiohttp.web.json_response(
+                {"error": "missing timestamp in JSON body or query"},
+                status=400,
+            )
+
+        pause_until_epoch = self._parse_timestamp_to_epoch(str(timestamp_raw))
+        if pause_until_epoch is None:
+            return aiohttp.web.json_response(
+                {
+                    "error": "invalid timestamp format, use UNIX epoch seconds or ISO8601"
+                },
+                status=400,
+            )
+        self.paused_until_epoch = pause_until_epoch
+        LOG.info(
+            "Pause requested via API until "
+            f"{datetime.fromtimestamp(pause_until_epoch, tz=timezone.utc).isoformat()}"
+        )
+        return aiohttp.web.json_response(
+            {"paused_until_epoch": pause_until_epoch, "paused": self._is_paused()}
+        )
+
+    async def _handle_force_run(
+        self, request: aiohttp.web.Request
+    ) -> aiohttp.web.Response:
+        if not self._has_valid_api_token(request.headers):
+            return aiohttp.web.json_response({"error": "unauthorized"}, status=401)
+        self.force_run_requested.set()
+        LOG.info("Force run requested via API")
+        return aiohttp.web.json_response({"status": "scheduled"})
+
+    async def _handle_healthz(
+        self, request: aiohttp.web.Request
+    ) -> aiohttp.web.Response:
+        if not self._has_valid_api_token(request.headers):
+            return aiohttp.web.json_response({"error": "unauthorized"}, status=401)
+        health = await self._healthcheck()
+        status = 200 if bool(health.get("ok")) else 503
+        return aiohttp.web.json_response(health, status=status)
 
     def _rebase_or_clone_repo(self) -> None:
         git_ssh_cmd = f"ssh -i {self.config[SHED_CONFIG_SECTION].get('repo_key')}"
@@ -363,18 +576,33 @@ class Shed:
     async def prometheus_server(self) -> None:
         """Use aioprometheus to server statistics to prometheus"""
         self.prom_registry = Registry()
-        self.prom_service = Service(registry=self.prom_registry)
-        await self.prom_service.start(
-            addr=self.config[SHED_CONFIG_SECTION].get("prometheus_bind_addr", "::"),
-            port=self.stats_port,
+        app = aiohttp.web.Application()
+        app.router.add_route("GET", "/metrics", self._handle_metrics)
+        app.router.add_route("POST", "/pause", self._handle_pause)
+        app.router.add_route("POST", "/force-run", self._handle_force_run)
+        app.router.add_route("GET", "/healthz", self._handle_healthz)
+        runner = aiohttp.web.AppRunner(app, shutdown_timeout=2.0)
+        await runner.setup()
+        bind_addr = self.config[SHED_CONFIG_SECTION].get("prometheus_bind_addr", "::")
+        site = aiohttp.web.TCPSite(runner, bind_addr, self.stats_port)
+        await site.start()
+        LOG.info(
+            f"Serving prometheus metrics on: {self._metrics_url_for_log(bind_addr)}"
         )
-        LOG.info(f"Serving prometheus metrics on: {self.prom_service.metrics_url}")
-        await self._update_prom_stats()
-        await self.prom_service.stop()
+        if not self.api_token:
+            LOG.warning(
+                "api_token is not configured or uses the default placeholder; "
+                "authenticated API endpoints are unavailable"
+            )
+        try:
+            await self._update_prom_stats()
+        finally:
+            await runner.cleanup()
 
     # TODO: Make coroutine cleanly exit on shutdown
     async def ansible_runner(self) -> None:
         loop = asyncio.get_running_loop()
+        force_run_once = False
 
         if "start_splay" in self.config[SHED_CONFIG_SECTION]:
             start_splay_int = self.config[SHED_CONFIG_SECTION].getint(
@@ -392,6 +620,22 @@ class Shed:
                 None, _load_shed_config, self.config_path
             )
             self.reload_config_vars()
+
+            force_run_once = await self._wait_for_force_run(0)
+
+            if self._is_paused() and not force_run_once:
+                if self.paused_until_epoch is not None:
+                    pause_until = datetime.fromtimestamp(
+                        self.paused_until_epoch, tz=timezone.utc
+                    ).isoformat()
+                    LOG.info(f"Paused until {pause_until}, skipping this runtime")
+                force_run_once = await self._wait_for_force_run(
+                    self.run_interval_seconds
+                )
+                if force_run_once:
+                    LOG.info("Force run requested while paused; running once")
+                continue
+            force_run_once = False
             # Rebase ansible repo
             await loop.run_in_executor(None, self._rebase_or_clone_repo)
             # Run ansible playbook
@@ -409,7 +653,14 @@ class Shed:
 
             run_finish_time = time()
             run_time = int(run_finish_time - run_start_time)
-            sleep_time = self.run_interval_seconds - run_time
+            if run_time > self.run_interval_seconds:
+                LOG.warning(
+                    "Ansible run exceeded configured interval by "
+                    f"{run_time - self.run_interval_seconds}s"
+                )
+            sleep_time = max(self.run_interval_seconds - run_time, 0)
             LOG.info(f"Finished ansible run in {run_time}s. Sleeping for {sleep_time}s")
             LOG.debug(f"Stats:\n{dumps(self.prom_stats, indent=2, sort_keys=True)}")
-            await asyncio.sleep(sleep_time)
+            force_run_once = await self._wait_for_force_run(sleep_time)
+            if force_run_once:
+                LOG.info("Force run requested; starting next run now")
