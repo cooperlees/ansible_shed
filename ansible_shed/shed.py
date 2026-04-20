@@ -24,9 +24,13 @@ from aioprometheus.collectors import Gauge, Registry
 from aioprometheus.renderer import render
 from git.repo.base import Repo
 
+from ansible_shed.constants import (
+    DEFAULT_API_PORT,
+    DEFAULT_API_TOKEN_PLACEHOLDER,
+    SHED_CONFIG_SECTION,
+)
+
 LOG = logging.getLogger(__name__)
-SHED_CONFIG_SECTION = "ansible_shed"
-DEFAULT_API_TOKEN_PLACEHOLDER = "change-me-random-token"
 HEALTHCHECK_TIMEOUT_SECONDS = 5
 
 
@@ -77,7 +81,7 @@ class Shed:
             self.config[SHED_CONFIG_SECTION].getint("interval", fallback=60) * 60
         )
         self.stats_port = self.config[SHED_CONFIG_SECTION].getint(
-            "port", fallback=12345
+            "port", fallback=DEFAULT_API_PORT
         )
         self.vault_pass_file = self.config[SHED_CONFIG_SECTION].get("vault_pass_file")
         self.version_check_state_enabled = self.config[SHED_CONFIG_SECTION].getboolean(

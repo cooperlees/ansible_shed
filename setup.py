@@ -27,7 +27,12 @@ setup(
         "asyncio ansible tower like shed to run playbooks and have prometheus "
         + "collector stats"
     ),
-    packages=["ansible_shed", "ansible_shed.tests"],
+    packages=[
+        "ansible_shed",
+        "ansible_shed.cli",
+        "ansible_shed.client",
+        "ansible_shed.tests",
+    ],
     ext_modules=ext_modules,
     url="http://github.com/cooperlees/ansible_shed/",
     author="Cooper Lees",
@@ -37,8 +42,13 @@ setup(
         "Programming Language :: Python :: 3 :: Only",
         "Development Status :: 3 - Alpha",
     ],
-    entry_points={"console_scripts": ["ansible-shed = ansible_shed.main:main"]},
-    install_requires=["aioprometheus[aiohttp]", "click>=8.0", "GitPython"],
+    entry_points={
+        "console_scripts": [
+            "ansible-shed = ansible_shed.main:main",
+            "ansible-shed-cli = ansible_shed.cli.main:main",
+        ]
+    },
+    install_requires=["aiohttp", "aioprometheus[aiohttp]", "click>=8.0", "GitPython"],
     extras_require={
         # If you'd like the ansible toolset dependency installed
         "ansible": ["ansible"],
