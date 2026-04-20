@@ -83,6 +83,15 @@ ansible_unreachable{hostname="home2.cooperlees.com"} 0
   - `POST /force-run`
   - `GET /healthz` validates `ansible-playbook --help` and `git --help`
 
+## API CLI
+
+`ansible_shed` now installs `ansible-shed-cli` in the same Python environment as the
+service. It reads `api_token` and `port` from the same config file:
+
+- `ansible-shed-cli --config /etc/ansible_shed.ini pause --timestamp 1735689600`
+- `ansible-shed-cli --config /etc/ansible_shed.ini force-run`
+- `ansible-shed-cli --config /etc/ansible_shed.ini healthz`
+
 ## Grafana Dashboard
 
 - Available here: https://grafana.com/grafana/dashboards/14073
