@@ -5,7 +5,10 @@ import unittest
 from click.testing import CliRunner
 
 from ansible_shed.main import main
-from ansible_shed.tests.ansible_output import AnsibleOutputTests  # noqa: F401
+from ansible_shed.tests.ansible_output import (  # noqa: F401
+    AnsibleOutputTests,
+    AnsibleProfileTests,
+)
 from ansible_shed.tests.api import APITests  # noqa: F401
 from ansible_shed.tests.client_cli import ClientConfigAndCLITests  # noqa: F401
 from ansible_shed.tests.client_http import ClientHttpTests  # noqa: F401

@@ -49,6 +49,15 @@ def _load_shed_config(config_path: Path) -> ConfigParser:
 
 class Shed:
     ansible_stats_line_re = re.compile(r"([a-z\.0-9]*)\s+: (ok=.*)")
+    # ansible.posix.profile_tasks TASKS RECAP body row, e.g.:
+    #   "ansible_shed : Install latest ansible_shed --------- 29.80s"
+    profile_task_row_re = re.compile(
+        r"^(?P<name>.+?) -+\s+(?P<seconds>\d+(?:\.\d+)?)s\s*$"
+    )
+    profile_tasks_recap_header_re = re.compile(r"^TASKS RECAP \*+\s*$")
+    profile_task_header_re = re.compile(r"^TASK \[")
+    profile_warning_re = re.compile(r"^\[WARNING\]:")
+    profile_deprecation_re = re.compile(r"^\[DEPRECATION WARNING\]:")
 
     def __init__(self, config_path: Path) -> None:
         self.config = _load_shed_config(config_path)
@@ -60,6 +69,8 @@ class Shed:
         self.prom_stats_update = asyncio.Event()
         self.force_run_requested = asyncio.Event()
         self.version_check_packages: list[dict[str, str]] = []
+        self.profile_task_runtimes: list[dict[str, float | str]] = []
+        self.profile_role_runtimes: dict[str, float] = {}
         self.paused_until_epoch: int | None = None
 
         # Set and create log directory
@@ -86,6 +97,9 @@ class Shed:
         self.vault_pass_file = self.config[SHED_CONFIG_SECTION].get("vault_pass_file")
         self.version_check_state_enabled = self.config[SHED_CONFIG_SECTION].getboolean(
             "version_check_state_enabled", fallback=False
+        )
+        self.profile_tasks_top_n = self.config[SHED_CONFIG_SECTION].getint(
+            "profile_tasks_top_n", fallback=20
         )
         self._activate_ansible_virtualenv()
         configured_api_token = self.config[SHED_CONFIG_SECTION].get("api_token")
@@ -440,7 +454,88 @@ class Shed:
 
         self.prom_stats["ansible_last_run_returncode"] = returncode
         self.prom_stats["ansible_stats_last_updated"] = int(time())
+        self.parse_ansible_profile(ansible_output)
         self.prom_stats_update.set()
+
+    def _count_run_artifacts(self, lines: list[str]) -> tuple[int, int, int]:
+        """Count TASK headers, [WARNING]: lines and [DEPRECATION WARNING]: lines."""
+        task_count = 0
+        warnings_count = 0
+        deprecation_count = 0
+        for line in lines:
+            if self.profile_task_header_re.match(line):
+                task_count += 1
+            if self.profile_deprecation_re.match(line):
+                deprecation_count += 1
+            elif self.profile_warning_re.match(line):
+                warnings_count += 1
+        return task_count, warnings_count, deprecation_count
+
+    def _parse_recap_row(self, line: str) -> tuple[str, str, float] | None:
+        """Parse one TASKS RECAP body line into (role, task, seconds) or None."""
+        m = self.profile_task_row_re.match(line)
+        if not m:
+            return None
+        name = m.group("name").strip()
+        try:
+            seconds = float(m.group("seconds"))
+        except ValueError:
+            return None
+        if " : " in name:
+            role, task = name.split(" : ", 1)
+        else:
+            role, task = "", name
+        return role, task, seconds
+
+    def _extract_recap_rows(self, lines: list[str]) -> list[tuple[str, str, float]]:
+        """Pull (role, task, seconds) tuples out of the TASKS RECAP block."""
+        rows: list[tuple[str, str, float]] = []
+        in_recap = False
+        for line in lines:
+            if self.profile_tasks_recap_header_re.match(line):
+                in_recap = True
+                continue
+            if not in_recap:
+                continue
+            stripped = line.strip()
+            if stripped.startswith("PLAYBOOK RECAP") or (not stripped and rows):
+                in_recap = False
+                continue
+            row = self._parse_recap_row(line)
+            if row is not None:
+                rows.append(row)
+        return rows
+
+    def parse_ansible_profile(self, ansible_output: str) -> None:
+        """Parse output from ansible.posix.profile_tasks / .timer callbacks.
+
+        Populates self.profile_task_runtimes and self.profile_role_runtimes
+        from the TASKS RECAP block (truncated to self.profile_tasks_top_n by
+        descending duration). Also counts TASK headers, [WARNING]: lines and
+        [DEPRECATION WARNING]: lines for companion gauges.
+
+        Silently no-ops when the callbacks aren't producing output.
+        """
+        self.profile_task_runtimes = []
+        self.profile_role_runtimes = {}
+
+        lines = ansible_output.splitlines()
+        task_count, warnings_count, deprecation_count = self._count_run_artifacts(lines)
+        recap_rows = self._extract_recap_rows(lines)
+
+        recap_rows.sort(key=lambda row: row[2], reverse=True)
+        for role, task, seconds in recap_rows[: self.profile_tasks_top_n]:
+            self.profile_task_runtimes.append(
+                {"role": role, "task": task, "seconds": seconds}
+            )
+            self.profile_role_runtimes[role] = (
+                self.profile_role_runtimes.get(role, 0.0) + seconds
+            )
+
+        self.prom_stats["ansible_task_count_total"] = task_count
+        self.prom_stats["ansible_warnings_count"] = warnings_count
+        self.prom_stats["ansible_deprecation_warnings_count"] = deprecation_count
+        self.prom_stats["ansible_profile_tasks_detected"] = 1 if recap_rows else 0
 
     def parse_version_check_state(self) -> None:
         """Parse version_check_state.json and update prometheus stats if enabled"""
@@ -534,6 +629,26 @@ class Shed:
                 "Timestamp (seconds since epoch) of last version check",
                 registry=self.prom_registry,
             ),
+            "ansible_task_count_total": Gauge(
+                "ansible_task_count_total",
+                "Total number of TASK [...] headers seen in the last run",
+                registry=self.prom_registry,
+            ),
+            "ansible_warnings_count": Gauge(
+                "ansible_warnings_count",
+                "Number of [WARNING]: lines in the last run",
+                registry=self.prom_registry,
+            ),
+            "ansible_deprecation_warnings_count": Gauge(
+                "ansible_deprecation_warnings_count",
+                "Number of [DEPRECATION WARNING]: lines in the last run",
+                registry=self.prom_registry,
+            ),
+            "ansible_profile_tasks_detected": Gauge(
+                "ansible_profile_tasks_detected",
+                "1 if ansible.posix.profile_tasks output was detected in the last run, else 0",
+                registry=self.prom_registry,
+            ),
         }
 
         version_check_state_package_gauge = Gauge(
@@ -542,6 +657,19 @@ class Shed:
             registry=self.prom_registry,
         )
         prev_pkg_labels: list[dict[str, str]] = []
+
+        role_runtime_gauge = Gauge(
+            "ansible_role_runtime_seconds",
+            "Sum of top-N task runtimes per role (seconds)",
+            registry=self.prom_registry,
+        )
+        task_runtime_gauge = Gauge(
+            "ansible_task_runtime_seconds",
+            "Per-task runtime from ansible.posix.profile_tasks (seconds)",
+            registry=self.prom_registry,
+        )
+        prev_role_labels: list[dict[str, str]] = []
+        prev_task_labels: list[dict[str, str]] = []
 
         while True:
             await self.prom_stats_update.wait()
@@ -571,11 +699,51 @@ class Shed:
             # Remove gauge entries for packages no longer in the list
             for old_labels in prev_pkg_labels:
                 if old_labels not in current_pkg_labels:
-                    del version_check_state_package_gauge.values[old_labels]  # type: ignore[no-untyped-call]
+                    version_check_state_package_gauge.values.pop(old_labels, None)
             prev_pkg_labels = current_pkg_labels
+
+            prev_task_labels, prev_role_labels = self._refresh_profile_gauges(
+                task_runtime_gauge,
+                role_runtime_gauge,
+                prev_task_labels,
+                prev_role_labels,
+            )
+            metric_count += len(prev_task_labels) + len(prev_role_labels)
 
             LOG.info(f"Updated {metric_count} metrics")
             self.prom_stats_update.clear()
+
+    def _refresh_profile_gauges(
+        self,
+        task_gauge: Gauge,
+        role_gauge: Gauge,
+        prev_task_labels: list[dict[str, str]],
+        prev_role_labels: list[dict[str, str]],
+    ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+        """Set/clean ansible_task_runtime_seconds + ansible_role_runtime_seconds.
+
+        Removes labels from prev_*_labels that are no longer present so renamed
+        or absent tasks/roles do not leak as stale series.
+        """
+        current_task_labels: list[dict[str, str]] = []
+        for entry in self.profile_task_runtimes:
+            labels = {"role": str(entry["role"]), "task": str(entry["task"])}
+            task_gauge.set(labels, float(entry["seconds"]))
+            current_task_labels.append(labels)
+        for old_labels in prev_task_labels:
+            if old_labels not in current_task_labels:
+                task_gauge.values.pop(old_labels, None)
+
+        current_role_labels: list[dict[str, str]] = []
+        for role, seconds in self.profile_role_runtimes.items():
+            labels = {"role": role}
+            role_gauge.set(labels, seconds)
+            current_role_labels.append(labels)
+        for old_labels in prev_role_labels:
+            if old_labels not in current_role_labels:
+                role_gauge.values.pop(old_labels, None)
+
+        return current_task_labels, current_role_labels
 
     async def prometheus_server(self) -> None:
         """Use aioprometheus to server statistics to prometheus"""

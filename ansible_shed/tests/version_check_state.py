@@ -160,12 +160,12 @@ version_check_state_enabled=false
             version_check_packages_at_event.extend(shed.version_check_packages)
             original_parse_stats(output, returncode)
 
-        shed.parse_version_check_state = tracked_parse_version_check  # type: ignore[assignment]
-        shed.parse_ansible_stats = tracked_parse_stats  # type: ignore[assignment]
+        shed.parse_version_check_state = tracked_parse_version_check  # type: ignore[method-assign]
+        shed.parse_ansible_stats = tracked_parse_stats  # type: ignore[assignment,method-assign]
 
         # Stub out methods we don't need for this test
-        shed._rebase_or_clone_repo = Mock()  # type: ignore[assignment]
-        shed._run_ansible = Mock(return_value=(0, ""))  # type: ignore[assignment]
+        shed._rebase_or_clone_repo = Mock()  # type: ignore[method-assign]
+        shed._run_ansible = Mock(return_value=(0, ""))  # type: ignore[method-assign]
 
         async def run_one_iteration() -> None:
             loop = asyncio.get_running_loop()
