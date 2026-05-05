@@ -5,8 +5,8 @@ on:
     types: [published]
 
 jobs:
-  build:
-    name: Build sdist + wheel
+  sdist:
+    name: Build sdist
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -21,18 +21,40 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install build
 
-      - name: Build distributions
-        run: python -m build
+      - name: Build sdist
+        run: python -m build --sdist
 
-      - name: Upload distributions
+      - name: Upload sdist
         uses: actions/upload-artifact@v4
         with:
-          name: dist
-          path: dist/
+          name: dist-sdist
+          path: dist/*.tar.gz
+
+  wheels:
+    name: Build mypyc wheels (${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["cp313", "cp314"]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2
+        env:
+          CIBW_BUILD: ${{ matrix.python }}-manylinux_x86_64
+          CIBW_ENVIRONMENT: MYPYC_BUILD=1
+          CIBW_BUILD_VERBOSITY: 1
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-wheels-${{ matrix.python }}
+          path: wheelhouse/*.whl
 
   publish:
     name: Publish to PyPI
-    needs: build
+    needs: [sdist, wheels]
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -40,11 +62,12 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - name: Download distributions
+      - name: Download all distributions
         uses: actions/download-artifact@v4
         with:
-          name: dist
           path: dist/
+          pattern: dist-*
+          merge-multiple: true
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
