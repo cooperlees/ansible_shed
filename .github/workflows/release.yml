@@ -6,7 +6,7 @@ on:
 
 jobs:
   sdist:
-    name: Build sdist
+    name: Build sdist + pure-Python wheel
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -21,14 +21,16 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install build
 
-      - name: Build sdist
-        run: python -m build --sdist
+      - name: Build sdist + pure-Python wheel
+        run: python -m build
 
-      - name: Upload sdist
+      - name: Upload sdist + pure-Python wheel
         uses: actions/upload-artifact@v4
         with:
           name: dist-sdist
-          path: dist/*.tar.gz
+          path: |
+            dist/*.tar.gz
+            dist/*.whl
 
   wheels:
     name: Build mypyc wheels (${{ matrix.python }})
