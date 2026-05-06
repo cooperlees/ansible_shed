@@ -1,10 +1,50 @@
 [build-system]
 requires = [
-    "setuptools>=43",
+    "setuptools>=61",
     "wheel",
     "mypy>=1.0",
 ]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "ansible_shed"
+version = "2026.5.6"
+description = "asyncio ansible tower like shed to run playbooks and have prometheus collector stats"
+readme = "README.md"
+requires-python = ">=3.13"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Cooper Lees", email = "me@cooperlees.com" },
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Development Status :: 3 - Alpha",
+]
+dependencies = [
+    "aiohttp",
+    "aioprometheus[aiohttp]",
+    "click>=8.0",
+    "GitPython",
+]
+
+[project.optional-dependencies]
+ansible = ["ansible"]
+
+[project.urls]
+Homepage = "http://github.com/cooperlees/ansible_shed/"
+
+[project.scripts]
+ansible-shed = "ansible_shed.main:main"
+ansible-shed-cli = "ansible_shed.cli.main:main"
+
+[tool.setuptools]
+packages = [
+    "ansible_shed",
+    "ansible_shed.cli",
+    "ansible_shed.client",
+    "ansible_shed.tests",
+]
 
 [tool.mypy]
 python_version = "3.13"

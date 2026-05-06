@@ -19,41 +19,4 @@ if "MYPYC_BUILD" in environ:
         verbose=True,
     )
 
-
-setup(
-    name="ansible_shed",
-    version="2026.5.5.post3",
-    description=(
-        "asyncio ansible tower like shed to run playbooks and have prometheus "
-        + "collector stats"
-    ),
-    packages=[
-        "ansible_shed",
-        "ansible_shed.cli",
-        "ansible_shed.client",
-        "ansible_shed.tests",
-    ],
-    ext_modules=ext_modules,
-    url="http://github.com/cooperlees/ansible_shed/",
-    author="Cooper Lees",
-    author_email="me@cooperlees.com",
-    classifiers=[
-        "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3 :: Only",
-        "Development Status :: 3 - Alpha",
-    ],
-    entry_points={
-        "console_scripts": [
-            "ansible-shed = ansible_shed.main:main",
-            "ansible-shed-cli = ansible_shed.cli.main:main",
-        ]
-    },
-    install_requires=["aiohttp", "aioprometheus[aiohttp]", "click>=8.0", "GitPython"],
-    extras_require={
-        # If you'd like the ansible toolset dependency installed
-        "ansible": ["ansible"],
-    },
-    tests_require=["ptr"],
-    python_requires=">=3.13",
-    test_suite="ansible_shed.tests.base",
-)
+setup(ext_modules=ext_modules)
