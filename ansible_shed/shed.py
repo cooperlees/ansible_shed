@@ -416,9 +416,12 @@ class Shed:
         else:
             ansible_output = ""
             self._update_latest_log_symlink(run_log_path)
-            with Popen(
-                cmd, stderr=PIPE, stdout=PIPE, cwd=self.repo_path, encoding="utf8"
-            ) as p, run_log_path.open("w", buffering=1) as lf:
+            with (
+                Popen(
+                    cmd, stderr=PIPE, stdout=PIPE, cwd=self.repo_path, encoding="utf8"
+                ) as p,
+                run_log_path.open("w", buffering=1) as lf,
+            ):
                 if p.stdout:
                     for output_line in p.stdout:
                         ansible_output += output_line
