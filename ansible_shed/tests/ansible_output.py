@@ -2,6 +2,7 @@
 
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 from ansible_shed.shed import Shed
@@ -147,3 +148,53 @@ class AnsibleProfileTests(unittest.TestCase):
     def test_top_n_config_default(self) -> None:
         # ansible_shed.ini does not set profile_tasks_top_n; default is 20.
         self.assertEqual(self.shed.profile_tasks_top_n, 20)
+
+
+class RunAnsibleStderrTests(unittest.TestCase):
+    """Ansible emits [WARNING]/[DEPRECATION WARNING] lines on stderr, so
+    _run_ansible must fold stderr into the returned output for the parser to
+    count them."""
+
+    @patch("pathlib.Path.mkdir")
+    def setUp(self, mock_mkdir: Mock) -> None:
+        self.shed = Shed(SHED_CONFIG_PATH)
+        return super().setUp()
+
+    @patch("ansible_shed.shed.Popen")
+    def test_run_ansible_captures_stderr_warnings(self, mock_popen: Mock) -> None:
+        stdout_lines = [
+            "TASK [Gathering Facts] ****\n",
+            "ok: [host1.example.com]\n",
+        ]
+        stderr_text = (
+            "[WARNING]: kubernetes is not supported.\n"
+            "[DEPRECATION WARNING]: apt_repository has been deprecated.\n"
+        )
+
+        proc = Mock()
+        proc.stdout = iter(stdout_lines)
+        proc.stderr = Mock()
+        proc.stderr.read.return_value = stderr_text
+        proc.returncode = 0
+        mock_popen.return_value.__enter__ = Mock(return_value=proc)
+        mock_popen.return_value.__exit__ = Mock(return_value=False)
+
+        with TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "run.log"
+            with (
+                patch.object(self.shed, "_create_logfile", return_value=log_path),
+                patch.object(self.shed, "_update_latest_log_symlink"),
+            ):
+                _, ansible_output = self.shed._run_ansible()
+            log_contents = log_path.read_text()
+
+        # stderr content is folded into the parsed output...
+        self.assertIn("[DEPRECATION WARNING]", ansible_output)
+        self.assertIn("[WARNING]", ansible_output)
+        # ...and is still written to the run log file.
+        self.assertIn("[DEPRECATION WARNING]", log_contents)
+
+        # The parser counts those stderr-sourced lines.
+        self.shed.parse_ansible_stats(ansible_output, 0)
+        self.assertEqual(self.shed.prom_stats["ansible_warnings_count"], 1)
+        self.assertEqual(self.shed.prom_stats["ansible_deprecation_warnings_count"], 1)
