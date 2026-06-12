@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from json import dumps, JSONDecodeError, loads
 from pathlib import Path
 from random import randint
-from subprocess import PIPE, Popen, run
+from subprocess import PIPE, STDOUT, Popen, run
 from time import time
 from typing import TypedDict
 
@@ -410,7 +410,9 @@ class Shed:
         ansible_start_time = time()
 
         if not run_log_path:
-            cp = run(cmd, stdout=PIPE, cwd=self.repo_path, encoding="utf-8")
+            cp = run(
+                cmd, stdout=PIPE, stderr=STDOUT, cwd=self.repo_path, encoding="utf-8"
+            )
             ansible_output = cp.stdout
             return_code = cp.returncode
         else:
@@ -428,7 +430,9 @@ class Shed:
                         lf.write(output_line)
 
                 if p.stderr:
-                    lf.write(p.stderr.read())
+                    stderr_output = p.stderr.read()
+                    ansible_output += stderr_output
+                    lf.write(stderr_output)
 
             return_code = p.returncode
 
