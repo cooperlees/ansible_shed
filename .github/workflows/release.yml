@@ -38,12 +38,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["cp313", "cp314"]
-        arch: [x86_64, aarch64]
         include:
-          - arch: x86_64
+          - python: cp313
+            arch: x86_64
             runner: ubuntu-latest
-          - arch: aarch64
+          - python: cp313
+            arch: aarch64
+            runner: ubuntu-24.04-arm
+          - python: cp314
+            arch: x86_64
+            runner: ubuntu-latest
+          - python: cp314
+            arch: aarch64
             runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v6
