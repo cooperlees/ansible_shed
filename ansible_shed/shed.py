@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from json import dumps, JSONDecodeError, loads
 from pathlib import Path
 from random import randint
-from subprocess import PIPE, STDOUT, Popen, run
+from subprocess import PIPE, Popen, run, STDOUT
 from time import time
 from typing import TypedDict
 

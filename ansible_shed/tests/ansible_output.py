@@ -197,6 +197,4 @@ class RunAnsibleStderrTests(unittest.TestCase):
         # The parser counts those stderr-sourced lines.
         self.shed.parse_ansible_stats(ansible_output, 0)
         self.assertEqual(self.shed.prom_stats["ansible_warnings_count"], 1)
-        self.assertEqual(
-            self.shed.prom_stats["ansible_deprecation_warnings_count"], 1
-        )
+        self.assertEqual(self.shed.prom_stats["ansible_deprecation_warnings_count"], 1)
