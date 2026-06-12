@@ -33,25 +33,38 @@ jobs:
             dist/*.whl
 
   wheels:
-    name: Build mypyc wheels (${{ matrix.python }})
-    runs-on: ubuntu-latest
+    name: Build mypyc wheels (${{ matrix.python }}-${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     strategy:
+      fail-fast: false
       matrix:
-        python: ["cp313", "cp314"]
+        include:
+          - python: cp313
+            arch: x86_64
+            runner: ubuntu-latest
+          - python: cp313
+            arch: aarch64
+            runner: ubuntu-24.04-arm
+          - python: cp314
+            arch: x86_64
+            runner: ubuntu-latest
+          - python: cp314
+            arch: aarch64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v6
 
       - name: Build wheels
         uses: pypa/cibuildwheel@v4.0.0
         env:
-          CIBW_BUILD: ${{ matrix.python }}-manylinux_x86_64
+          CIBW_BUILD: ${{ matrix.python }}-manylinux_${{ matrix.arch }}
           CIBW_ENVIRONMENT: MYPYC_BUILD=1
           CIBW_BUILD_VERBOSITY: 1
 
       - name: Upload wheels
         uses: actions/upload-artifact@v7
         with:
-          name: dist-wheels-${{ matrix.python }}
+          name: dist-wheels-${{ matrix.python }}-${{ matrix.arch }}
           path: wheelhouse/*.whl
 
   publish:
