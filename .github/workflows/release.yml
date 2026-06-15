@@ -55,7 +55,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v4.0.0
+        uses: pypa/cibuildwheel@v4.1.0
         env:
           CIBW_BUILD: ${{ matrix.python }}-manylinux_${{ matrix.arch }}
           CIBW_ENVIRONMENT: MYPYC_BUILD=1
