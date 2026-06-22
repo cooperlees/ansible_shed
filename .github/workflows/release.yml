@@ -9,7 +9,7 @@ jobs:
     name: Build sdist + pure-Python wheel
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -52,7 +52,7 @@ jobs:
             arch: aarch64
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Build wheels
         uses: pypa/cibuildwheel@v4.1.0
