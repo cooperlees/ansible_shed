@@ -12,6 +12,7 @@ from ansible_shed.tests.ansible_output import (  # noqa: F401
 from ansible_shed.tests.api import APITests  # noqa: F401
 from ansible_shed.tests.client_cli import ClientConfigAndCLITests  # noqa: F401
 from ansible_shed.tests.client_http import ClientHttpTests  # noqa: F401
+from ansible_shed.tests.rebase_or_clone_repo import RebaseOrCloneRepoTests  # noqa: F401
 from ansible_shed.tests.version_check_state import VersionCheckStateTests  # noqa: F401
 
 
