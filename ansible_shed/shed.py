@@ -301,10 +301,17 @@ class Shed:
         git_ssh_cmd = f"ssh -i {self.config[SHED_CONFIG_SECTION].get('repo_key')}"
         if self.init_file.exists():
             LOG.info(f"Rebasing {self.repo_path} from {self.repo_url}")
-            repo = Repo(self.repo_path)
-            with repo.git.custom_environment(GIT_SSH_COMMAND=git_ssh_cmd):
-                repo.remotes.origin.fetch()
-                repo.remotes.origin.refs.main.checkout()
+            # Repo must be closed (context manager) or it leaks a persistent
+            # `git cat-file --batch-check` helper subprocess per call. A
+            # fresh Repo(...) is created every run_interval_seconds here, so
+            # an unclosed one accumulates one leaked process per cycle
+            # forever - eventually enough of them pile up (holding the repo
+            # open) that a later fetch/checkout hangs indefinitely, wedging
+            # this whole coroutine with no exception and no crash.
+            with Repo(self.repo_path) as repo:
+                with repo.git.custom_environment(GIT_SSH_COMMAND=git_ssh_cmd):
+                    repo.remotes.origin.fetch()
+                    repo.remotes.origin.refs.main.checkout()
             self._setup_vault_pass()
             return
 
@@ -318,12 +325,13 @@ class Shed:
         self.repo_path.mkdir(parents=True)
         LOG.info(f"Cloning {self.repo_url} to {self.repo_path}")
 
-        Repo.clone_from(
+        with Repo.clone_from(
             self.repo_url,
             self.repo_path,
             env={"GIT_SSH_COMMAND": git_ssh_cmd},
             branch="main",
-        )
+        ):
+            pass
 
         self._setup_vault_pass()
 
