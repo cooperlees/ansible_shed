@@ -115,7 +115,10 @@ def parse_ansible_stages(raw: str) -> list[list[AnsibleJob]]:
 
 
 class Shed:
-    ansible_stats_line_re = re.compile(r"([a-z\.0-9]*)\s+: (ok=.*)")
+    # PLAY RECAP row. Anchored, and "-" allowed: unanchored [a-z.0-9]* matched
+    # only the "0.cooperlees.com" suffix of node-0.cooperlees.com. No "_",
+    # since the host_<hostname>_<stat> keys are split on it.
+    ansible_stats_line_re = re.compile(r"^([A-Za-z0-9.-]+)\s+: (ok=.*)")
     # ansible.posix.profile_tasks TASKS RECAP body row, e.g.:
     #   "ansible_shed : Install latest ansible_shed --------- 29.80s"
     profile_task_row_re = re.compile(
