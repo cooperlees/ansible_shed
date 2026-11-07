@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ansible_shed"
-version = "2026.11.7"
+version = "2026.11.7.post1"
 description = "asyncio ansible tower like shed to run playbooks and have prometheus collector stats"
 readme = "README.md"
 requires-python = ">=3.13"
