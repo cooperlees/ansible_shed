@@ -57,6 +57,7 @@ Each iteration: **reload config from disk** → check force-run/pause → rebase
 
 - `profile_tasks_top_n`: parses the `ansible.posix.profile_tasks` TASKS RECAP block into per-task/per-role runtime gauges (top N by duration).
 - `version_check_state_enabled`: reads `version_check_state.json` from the repo root into package-upgrade gauges.
+- `ansible_stages`: replaces the single run with sequential stages of parallel `playbook[@limit]` jobs (`parse_ansible_stages` → `_run_ansible_stages`, one `ThreadPoolExecutor` per stage, since `_run_ansible` already runs inside the executor). The parsers are deliberately unchanged: job outputs are concatenated and parsed as if they were one run, which is why `parse_ansible_stats` **sums** per-host recap rows (a host appears in every job it ran in). Per-job results live in `self.job_stats` → `ansible_job_run_time` / `ansible_job_returncode`. Without `ansible_stages` the code path is the original single run — keep it that way.
 
 ### Ansible virtualenv activation
 
