@@ -28,6 +28,7 @@ home1.cooperlees.com       : ok=10   changed=1    unreachable=0    failed=0    s
 RECAP_POST = """PLAY RECAP *********************************************************************
 home1.cooperlees.com       : ok=2    changed=0    unreachable=0    failed=0    skipped=1    rescued=0    ignored=0
 us.cooperlees.com          : ok=1    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+node-0.cooperlees.com      : ok=3    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
 """
 
 
@@ -173,6 +174,9 @@ class StagedRunTests(unittest.TestCase):
             self.assertEqual(shed.prom_stats["host_home1.cooperlees.com_ok"], 12)
             self.assertEqual(shed.prom_stats["host_home1.cooperlees.com_skipped"], 3)
             self.assertEqual(shed.prom_stats["host_us.cooperlees.com_ok"], 1)
+            # Hyphenated hostnames used to be truncated to "0.cooperlees.com".
+            self.assertEqual(shed.prom_stats["host_node-0.cooperlees.com_ok"], 3)
+            self.assertNotIn("host_0.cooperlees.com_ok", shed.prom_stats)
 
     def test_refresh_job_gauges_drops_stale_jobs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
