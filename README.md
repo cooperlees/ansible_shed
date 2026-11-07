@@ -83,6 +83,44 @@ ansible_unreachable{hostname="home2.cooperlees.com"} 0
   - `POST /force-run`
   - `GET /healthz` validates `ansible-playbook --help` and `git --help`
 
+## Parallel staged runs (`ansible_stages`)
+
+By default each run is one `ansible-playbook <ansible_playbook_init>`. Under
+Ansible's default `linear` strategy every task waits for the slowest host, so
+one high-latency host paces the whole fleet. `ansible_stages` splits a run into
+stages of jobs instead:
+
+```ini
+# ";" separates stages, which run one after another.
+# "," separates jobs inside a stage, which run in parallel.
+# A job is "playbook" or "playbook@limit". Inside one job's limit, join hosts
+# or groups with ansible's ":" pattern separator (e.g. main.yaml@home1:home2).
+ansible_stages=
+    main.yaml@home1.example.com, main.yaml@us.example.com, main.yaml@k8s;
+    post.yaml
+```
+
+- Keep the jobs inside a stage on **disjoint hosts**: two ansible processes
+  converging the same host at once will fight over things like the dpkg lock.
+- Plays with `run_once` / `delegate_to: localhost` (git pushes, writing state
+  files in the repo) belong in a single-job stage.
+- A job's `@limit` replaces `ansible_limit`; jobs without one use
+  `ansible_limit`. `ansible_tags`, `ansible_skip_tags`, `ansible_show_diff`
+  and the vault file apply to every job.
+- Later stages still run when a job fails, the same as one big run where a
+  failed host does not stop the others. `ansible_last_run_returncode` is the
+  first non-zero job return code and `ansible_last_run_time` is the whole run's
+  wall time.
+- Each job streams to its own `ansible_shed_run_<stamp>_s<stage>_<job>.log`
+  (tail these during a run). After the run, every job's output is written
+  de-interleaved to `ansible_shed_run_<stamp>.log`, and `latest.log` points
+  at that file.
+- Per-host recap counters are summed across jobs. There are also two per-job
+  gauges, `ansible_job_run_time` and `ansible_job_returncode`, labelled
+  `stage`, `playbook` and `limit`.
+- An invalid value is logged and the shed falls back to the single
+  `ansible_playbook_init` run, since the config is re-read on every loop.
+
 ## API CLI
 
 `ansible_shed` now installs `ansible-shed-cli` in the same Python environment as the

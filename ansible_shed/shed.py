@@ -9,6 +9,7 @@ import secrets
 import shutil
 from collections import defaultdict
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from configparser import ConfigParser
 from datetime import datetime, timezone
 from json import dumps, JSONDecodeError, loads
@@ -47,6 +48,72 @@ def _load_shed_config(config_path: Path) -> ConfigParser:
     return cp
 
 
+class AnsibleJob:
+    """One ansible-playbook invocation inside a stage of ``ansible_stages``."""
+
+    def __init__(self, stage: int, playbook: str, limit: str | None) -> None:
+        self.stage = stage
+        self.playbook = playbook
+        self.limit = limit
+
+    @property
+    def name(self) -> str:
+        return f"{self.playbook}@{self.limit}" if self.limit else self.playbook
+
+    @property
+    def labels(self) -> dict[str, str]:
+        return {
+            "stage": str(self.stage),
+            "playbook": self.playbook,
+            "limit": self.limit or "",
+        }
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, AnsibleJob):
+            return NotImplemented
+        return (self.stage, self.playbook, self.limit) == (
+            other.stage,
+            other.playbook,
+            other.limit,
+        )
+
+    def __hash__(self) -> int:
+        return hash((self.stage, self.playbook, self.limit))
+
+    def __repr__(self) -> str:
+        return f"AnsibleJob({self.stage}, {self.playbook!r}, {self.limit!r})"
+
+
+def parse_ansible_stages(raw: str) -> list[list[AnsibleJob]]:
+    """Parse the ``ansible_stages`` config value.
+
+    Stages are separated by ``;`` and run sequentially. Jobs within a stage
+    are separated by ``,`` and run in parallel. A job is ``playbook`` or
+    ``playbook@limit``; join several hosts/groups inside one job's limit with
+    ansible's ``:`` pattern separator (e.g. ``main.yaml@home1:home2``), since
+    ``,`` already separates jobs. Whitespace and newlines are ignored, so the
+    value can be wrapped over indented continuation lines.
+    """
+    stages: list[list[AnsibleJob]] = []
+    for stage_raw in raw.split(";"):
+        jobs: list[AnsibleJob] = []
+        for job_raw in stage_raw.split(","):
+            job_str = job_raw.strip()
+            if not job_str:
+                continue
+            playbook, sep, limit = job_str.partition("@")
+            playbook = playbook.strip()
+            limit = limit.strip()
+            if not playbook:
+                raise ValueError(f"ansible_stages job {job_str!r} has no playbook")
+            if sep and not limit:
+                raise ValueError(f"ansible_stages job {job_str!r} has an empty limit")
+            jobs.append(AnsibleJob(len(stages), playbook, limit or None))
+        if jobs:
+            stages.append(jobs)
+    return stages
+
+
 class Shed:
     ansible_stats_line_re = re.compile(r"([a-z\.0-9]*)\s+: (ok=.*)")
     # ansible.posix.profile_tasks TASKS RECAP body row, e.g.:
@@ -71,6 +138,8 @@ class Shed:
         self.version_check_packages: list[dict[str, str]] = []
         self.profile_task_runtimes: list[dict[str, float | str]] = []
         self.profile_role_runtimes: dict[str, float] = {}
+        # Per-job (labels, returncode, runtime_seconds) from the last staged run
+        self.job_stats: list[tuple[dict[str, str], int, int]] = []
         self.paused_until_epoch: int | None = None
 
         # Set and create log directory
@@ -101,6 +170,18 @@ class Shed:
         self.profile_tasks_top_n = self.config[SHED_CONFIG_SECTION].getint(
             "profile_tasks_top_n", fallback=20
         )
+        self.ansible_stages: list[list[AnsibleJob]] = []
+        stages_raw = self.config[SHED_CONFIG_SECTION].get("ansible_stages", "")
+        if stages_raw.strip():
+            try:
+                self.ansible_stages = parse_ansible_stages(stages_raw)
+            except ValueError:
+                # The config is re-read every loop: a bad edit must not kill
+                # the runner. Fall back to the single ansible_playbook_init run.
+                LOG.exception(
+                    "Invalid ansible_stages; falling back to a single "
+                    "ansible_playbook_init run"
+                )
         self._activate_ansible_virtualenv()
         configured_api_token = self.config[SHED_CONFIG_SECTION].get("api_token")
         if configured_api_token == DEFAULT_API_TOKEN_PLACEHOLDER:
@@ -379,13 +460,98 @@ class Shed:
 
     def _run_ansible(self) -> tuple[int, str]:
         """Run ansible-playbook and parse out statistics for prometheus"""
-        run_log_path = self._create_logfile()
+        if self.ansible_stages:
+            return self._run_ansible_stages(self.ansible_stages)
 
+        run_log_path = self._create_logfile()
+        if run_log_path:
+            self._update_latest_log_symlink(run_log_path)
+        cmd = self._build_ansible_cmd(
+            self.config[SHED_CONFIG_SECTION]["ansible_playbook_init"],
+            self.config[SHED_CONFIG_SECTION].get("ansible_limit"),
+        )
+        ansible_start_time = time()
+        return_code, ansible_output = self._run_ansible_cmd(cmd, run_log_path)
+        runtime = int(time() - ansible_start_time)
+        self.prom_stats["ansible_last_run_time"] = runtime
+        self.job_stats = []
+        LOG.info(f"Finished running ansible in {runtime}s")
+        return (return_code, ansible_output)
+
+    def _job_log_path(self, run_stamp: str, job: AnsibleJob) -> Path | None:
+        if not self.log_dir_path:
+            return None
+        safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", job.name)
+        return (
+            self.log_dir_path
+            / f"ansible_shed_run_{run_stamp}_s{job.stage}_{safe_name}.log"
+        )
+
+    def _run_ansible_job(self, job: AnsibleJob, run_stamp: str) -> tuple[int, str, int]:
+        """Run one staged job; returns (returncode, output, runtime_seconds)."""
+        cmd = self._build_ansible_cmd(job.playbook, job.limit)
+        start = time()
+        returncode, output = self._run_ansible_cmd(
+            cmd, self._job_log_path(run_stamp, job)
+        )
+        runtime = int(time() - start)
+        LOG.info(
+            f"Job {job.name} (stage {job.stage}) finished rc={returncode} in {runtime}s"
+        )
+        return returncode, output, runtime
+
+    def _run_ansible_stages(self, stages: list[list[AnsibleJob]]) -> tuple[int, str]:
+        """Run each stage in order, the jobs inside a stage in parallel.
+
+        Later stages still run when a job fails - the same as one big
+        ansible-playbook run, where a failed host does not stop the others.
+        The returned output is every job's output concatenated (so the
+        existing parsers see all recaps), and the returncode is the first
+        non-zero one in stage/job order.
+        """
+        run_stamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        start = time()
+        returncode = 0
+        outputs: list[str] = []
+        job_stats: list[tuple[dict[str, str], int, int]] = []
+        for stage in stages:
+            LOG.info(
+                f"Starting stage {stage[0].stage}: {', '.join(j.name for j in stage)}"
+            )
+            with ThreadPoolExecutor(max_workers=len(stage)) as pool:
+                futures = [
+                    pool.submit(self._run_ansible_job, j, run_stamp) for j in stage
+                ]
+                results = [f.result() for f in futures]
+            for job, (job_rc, job_output, job_runtime) in zip(stage, results):
+                outputs.append(
+                    f"===== ansible_shed job {job.name} stage={job.stage} "
+                    f"rc={job_rc} runtime={job_runtime}s =====\n{job_output}"
+                )
+                job_stats.append((job.labels, job_rc, job_runtime))
+                if job_rc != 0 and returncode == 0:
+                    returncode = job_rc
+
+        ansible_output = "\n".join(outputs)
+        if self.log_dir_path:
+            # Combined, de-interleaved log of the whole run, stamped like the
+            # per-job logs next to it (those are the ones to tail mid-run).
+            run_log_path = self.log_dir_path / f"ansible_shed_run_{run_stamp}.log"
+            run_log_path.write_text(ansible_output)
+            self._update_latest_log_symlink(run_log_path)
+
+        runtime = int(time() - start)
+        self.prom_stats["ansible_last_run_time"] = runtime
+        self.job_stats = job_stats
+        LOG.info(f"Finished running {len(job_stats)} ansible jobs in {runtime}s")
+        return (returncode, ansible_output)
+
+    def _build_ansible_cmd(self, playbook: str, limit: str | None) -> list[str]:
         cmd = [
             self.config[SHED_CONFIG_SECTION]["ansible_playbook_binary"],
             "--inventory",
             self.config[SHED_CONFIG_SECTION]["ansible_hosts_inventory"],
-            self.config[SHED_CONFIG_SECTION]["ansible_playbook_init"],
+            playbook,
         ]
         # Add vault password file if it exists
         vault_pass_file = self.repo_path / ".vault_pass"
@@ -397,11 +563,8 @@ class Shed:
             and self.config[SHED_CONFIG_SECTION]["ansible_show_diff"]
         ):
             cmd.append("--diff")
-        if (
-            "ansible_limit" in self.config[SHED_CONFIG_SECTION]
-            and self.config[SHED_CONFIG_SECTION]["ansible_limit"]
-        ):
-            cmd.extend(["--limit", self.config[SHED_CONFIG_SECTION]["ansible_limit"]])
+        if limit:
+            cmd.extend(["--limit", limit])
         if (
             "ansible_tags" in self.config[SHED_CONFIG_SECTION]
             and self.config[SHED_CONFIG_SECTION]["ansible_tags"]
@@ -414,9 +577,13 @@ class Shed:
             cmd.extend(
                 ["--skip-tags", self.config[SHED_CONFIG_SECTION]["ansible_skip_tags"]]
             )
-        LOG.info(f"Running ansible-playbook: '{' '.join(cmd)}'")
-        ansible_start_time = time()
+        return cmd
 
+    def _run_ansible_cmd(
+        self, cmd: list[str], run_log_path: Path | None
+    ) -> tuple[int, str]:
+        """Run one ansible-playbook command, streaming to run_log_path if set."""
+        LOG.info(f"Running ansible-playbook: '{' '.join(cmd)}'")
         if not run_log_path:
             cp = run(
                 cmd, stdout=PIPE, stderr=STDOUT, cwd=self.repo_path, encoding="utf-8"
@@ -425,7 +592,6 @@ class Shed:
             return_code = cp.returncode
         else:
             ansible_output = ""
-            self._update_latest_log_symlink(run_log_path)
             with (
                 Popen(
                     cmd, stderr=PIPE, stdout=PIPE, cwd=self.repo_path, encoding="utf8"
@@ -444,9 +610,6 @@ class Shed:
 
             return_code = p.returncode
 
-        runtime = int(time() - ansible_start_time)
-        self.prom_stats["ansible_last_run_time"] = runtime
-        LOG.info(f"Finished running ansible in {runtime}s")
         return (return_code, ansible_output)
 
     def parse_ansible_stats(self, ansible_output: str, returncode: int) -> None:
@@ -463,9 +626,11 @@ class Shed:
 
             hostname = lm.group(1)
             results = lm.group(2)
+            # Summed, not assigned: with ansible_stages one host appears in
+            # the PLAY RECAP of every job it ran in.
             for stat in results.split():
                 k, v = stat.split("=", maxsplit=1)
-                self.prom_stats[f"host_{hostname}_{k}"] = int(v)
+                self.prom_stats[f"host_{hostname}_{k}"] += int(v)
 
         self.prom_stats["ansible_last_run_returncode"] = returncode
         self.prom_stats["ansible_stats_last_updated"] = int(time())
@@ -686,6 +851,18 @@ class Shed:
         prev_role_labels: list[dict[str, str]] = []
         prev_task_labels: list[dict[str, str]] = []
 
+        job_runtime_gauge = Gauge(
+            "ansible_job_run_time",
+            "Seconds each ansible_stages job took in the last run",
+            registry=self.prom_registry,
+        )
+        job_returncode_gauge = Gauge(
+            "ansible_job_returncode",
+            "UNIX return code of each ansible_stages job in the last run",
+            registry=self.prom_registry,
+        )
+        prev_job_labels: list[dict[str, str]] = []
+
         while True:
             await self.prom_stats_update.wait()
             LOG.debug("Updating prometheus stats due to event being set")
@@ -725,6 +902,11 @@ class Shed:
             )
             metric_count += len(prev_task_labels) + len(prev_role_labels)
 
+            prev_job_labels = self._refresh_job_gauges(
+                job_runtime_gauge, job_returncode_gauge, prev_job_labels
+            )
+            metric_count += 2 * len(prev_job_labels)
+
             LOG.info(f"Updated {metric_count} metrics")
             self.prom_stats_update.clear()
 
@@ -759,6 +941,24 @@ class Shed:
                 role_gauge.values.pop(old_labels, None)
 
         return current_task_labels, current_role_labels
+
+    def _refresh_job_gauges(
+        self,
+        runtime_gauge: Gauge,
+        returncode_gauge: Gauge,
+        prev_job_labels: list[dict[str, str]],
+    ) -> list[dict[str, str]]:
+        """Set/clean the per-job gauges; drops jobs no longer in ansible_stages."""
+        current_job_labels: list[dict[str, str]] = []
+        for labels, returncode, runtime in self.job_stats:
+            runtime_gauge.set(labels, runtime)
+            returncode_gauge.set(labels, returncode)
+            current_job_labels.append(labels)
+        for old_labels in prev_job_labels:
+            if old_labels not in current_job_labels:
+                runtime_gauge.values.pop(old_labels, None)
+                returncode_gauge.values.pop(old_labels, None)
+        return current_job_labels
 
     async def prometheus_server(self) -> None:
         """Use aioprometheus to server statistics to prometheus"""
